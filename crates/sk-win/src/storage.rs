@@ -715,12 +715,21 @@ mod tests {
         assert_eq!(HEADER_LEN % 8, 0, "nagłówek ATA ma {HEADER_LEN} B");
     }
 
-    /// Test sprzętowy: `cargo test -p sk-win -- --ignored` (wymaga admina).
+    /// Test sprzętowy: `cargo test -p sk-win -- --ignored`.
+    ///
+    /// `cargo test` bez podniesienia procesu nie widzi dysków fizycznych —
+    /// wtedy test wymaga, żeby porażka była zgłoszona jako brak uprawnień
+    /// (`AccessDenied`), a nie jako panika albo puste dane. Z administratorem
+    /// test wymaga co najmniej jednego dysku z magistralą i SMART-em.
     #[test]
     #[ignore = "wymaga uprawnień administratora i prawdziwego dysku"]
     fn reads_real_drive_descriptors_and_smart() {
+        use crate::env::WinHostEnv;
+
         let storage = WinStorage::new();
+        let elevated = sk_core::providers::HostEnv::is_elevated(&WinHostEnv);
         let mut found = 0;
+        let mut denied = 0;
         for index in 0..8 {
             match storage.describe(index) {
                 Ok(drive) => {
@@ -743,9 +752,20 @@ mod tests {
                         }
                     }
                 }
+                Err(ModuleError::AccessDenied { .. }) => denied += 1,
                 Err(err) => println!("dysk {index}: brak dostępu ({err})"),
             }
         }
+
+        if !elevated {
+            assert!(
+                found > 0 || denied > 0,
+                "bez administratora żaden dysk nie zwrócił ani danych, ani odmowy dostępu"
+            );
+            println!("proces bez administratora: {denied} dysków z odmową dostępu — oczekiwane");
+            return;
+        }
+
         assert!(found > 0, "nie znaleziono żadnego dysku fizycznego");
     }
 }
