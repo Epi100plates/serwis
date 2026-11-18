@@ -6,7 +6,7 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, PlotPoints};
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, NoteLevel, Table, View};
+use sk_core::view::{Block, Chart, NoteLevel, StatusLevel, Table, View};
 
 pub fn view(ui: &mut egui::Ui, view: &View, translator: &Translator) {
     if view.sections.is_empty() {
@@ -66,7 +66,38 @@ fn block_ui(ui: &mut egui::Ui, block: &Block, translator: &Translator) {
                     .color(egui::Color32::from_rgb(140, 180, 230)),
             );
         }
+        Block::Status {
+            label_key,
+            value_key,
+            level,
+        } => {
+            // Baner stanu: ramka i duża kolorowana wartość, bo to pierwsza
+            // informacja, której szuka technik („czy dysk jest zdrowy”).
+            let color = status_color(*level);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(translator.t(label_key)).small().weak());
+                    ui.label(
+                        egui::RichText::new(translator.t(value_key))
+                            .size(22.0)
+                            .strong()
+                            .color(color),
+                    );
+                });
+            });
+        }
         Block::Chart { chart } => chart_ui(ui, chart, translator),
+    }
+}
+
+/// Kolor stanu — ten sam w GUI i w raporcie HTML, żeby „Dobry” znaczyło to samo
+/// w obu miejscach.
+pub fn status_color(level: StatusLevel) -> egui::Color32 {
+    match level {
+        StatusLevel::Ok => egui::Color32::from_rgb(110, 190, 120),
+        StatusLevel::Warn => egui::Color32::from_rgb(220, 180, 90),
+        StatusLevel::Bad => egui::Color32::from_rgb(220, 100, 100),
+        StatusLevel::Unknown => egui::Color32::from_rgb(150, 156, 162),
     }
 }
 
@@ -75,26 +106,36 @@ fn table_ui(ui: &mut egui::Ui, table: &Table, translator: &Translator) {
         return;
     }
 
-    egui::Grid::new(ui.next_auto_id())
-        .num_columns(table.headers.len())
-        .spacing([18.0, 6.0])
-        .striped(true)
+    // Tabele bywają szersze niż okno (SMART ma 8 kolumn, pamięć 10), a egui nie
+    // zawija komórek — bez poziomego przewijania ostatnie kolumny były ucięte.
+    egui::ScrollArea::horizontal()
+        .id_salt(ui.next_auto_id())
         .show(ui, |ui| {
-            for header in &table.headers {
-                ui.label(egui::RichText::new(translator.t(header)).strong());
-            }
-            ui.end_row();
+            egui::Grid::new(ui.next_auto_id())
+                .num_columns(table.headers.len())
+                .spacing([18.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for header in &table.headers {
+                        ui.label(egui::RichText::new(translator.t(header)).strong());
+                    }
+                    ui.end_row();
 
-            for (row_index, row) in table.rows.iter().enumerate() {
-                for column in 0..table.headers.len() {
-                    let value = match table.value_key(row_index, column) {
-                        Some(key) => translator.t(key),
-                        None => row.get(column).cloned().unwrap_or_else(|| "-".to_string()),
-                    };
-                    ui.monospace(value);
-                }
-                ui.end_row();
-            }
+                    for (row_index, row) in table.rows.iter().enumerate() {
+                        for column in 0..table.headers.len() {
+                            let value = match table.value_key(row_index, column) {
+                                Some(key) => translator.t(key),
+                                None => row.get(column).cloned().unwrap_or_else(|| "-".to_string()),
+                            };
+                            let mut text = egui::RichText::new(value).monospace();
+                            if let Some(level) = table.cell_level(row_index, column) {
+                                text = text.color(status_color(level));
+                            }
+                            ui.label(text);
+                        }
+                        ui.end_row();
+                    }
+                });
         });
 }
 
@@ -205,5 +246,44 @@ mod tests {
         harness.run_steps(3);
 
         harness.get_by_label("Obciążenie procesora");
+    }
+
+    #[test]
+    fn renders_status_banner_with_translated_value() {
+        let translator = Translator::load().expect("tłumaczenia się wczytują");
+        let model = View::new(vec![
+            Section::new("module.storage_smart.section.drive").with_blocks(vec![Block::status(
+                "module.storage_smart.drive.health",
+                "module.storage_smart.health.good",
+                StatusLevel::Ok,
+            )]),
+        ]);
+
+        let mut harness = Harness::new_ui(|ui| view(ui, &model, &translator));
+        harness.run_steps(2);
+
+        harness.get_by_label("Stan dysku");
+        harness.get_by_label("Dobry");
+    }
+
+    #[test]
+    fn renders_cells_with_status_level() {
+        let translator = Translator::load().expect("tłumaczenia się wczytują");
+        let table = Table::new(
+            vec!["module.storage_smart.col.health".to_string()],
+            vec![vec![String::new()], vec!["86 %".to_string()]],
+        )
+        .with_value_key(0, 0, "module.storage_smart.health.bad")
+        .with_cell_level(0, 0, StatusLevel::Bad)
+        .with_cell_level(1, 0, StatusLevel::Warn);
+        let model = View::new(vec![
+            Section::new("module.storage_smart.section").with_blocks(vec![Block::Table { table }]),
+        ]);
+
+        let mut harness = Harness::new_ui(|ui| view(ui, &model, &translator));
+        harness.run_steps(2);
+
+        harness.get_by_label("Zły");
+        harness.get_by_label("86 %");
     }
 }

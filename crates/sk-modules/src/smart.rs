@@ -12,9 +12,9 @@ pub const SECTOR: usize = 512;
 /// Atrybuty ATA, których nazwy mamy przetłumaczone. Reszta trafia do raportu
 /// z numerem — dysk może zwrócić atrybut producenta, którego nikt nie opisze.
 pub const KNOWN_ATTRIBUTE_IDS: &[u8] = &[
-    1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 22, 160, 183, 184, 187, 188, 189, 190, 191, 192, 193,
-    194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 220, 221,
-    222, 223, 224, 225, 226, 230, 231, 232, 233, 234, 235, 240, 241, 242, 250, 251,
+    1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 22, 160, 177, 183, 184, 187, 188, 189, 190, 191, 192,
+    193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 220,
+    221, 222, 223, 224, 225, 226, 230, 231, 232, 233, 234, 235, 240, 241, 242, 250, 251,
 ];
 
 /// Atrybuty, których niezerowa wartość surowa oznacza realny problem: przealokowane
@@ -49,8 +49,9 @@ impl fmt::Display for SmartParseError {
 impl std::error::Error for SmartParseError {}
 
 /// Ocena stanu nośnika. `Bad` nie znaczy „dysk już nie działa”, tylko „dane
-/// mówią o awarii lub końcu zapasu”.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// mówią o awarii lub końcu zapasu”. Kolejność wariantów jest istotna: gorszy
+/// stan wygrywa przy agregacji (`Ord`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Health {
     Good,
     Warning,
@@ -69,6 +70,10 @@ pub struct NvmeHealth {
     /// Liczniki NVMe są 128-bitowe; w praktyce mieszczą się w `u64`.
     pub data_read_bytes: u128,
     pub data_written_bytes: u128,
+    /// Liczba poleceń odczytu i zapisu wysłanych przez hosta (odpowiednio
+    /// 64–79 i 80–95 strony logu) — pokazuje realne obciążenie nośnika.
+    pub host_read_commands: u64,
+    pub host_write_commands: u64,
     pub power_on_hours: u64,
     pub power_cycles: u64,
     pub controller_busy_minutes: u64,
@@ -179,6 +184,8 @@ pub fn parse_nvme_health(data: &[u8]) -> Result<NvmeHealth, SmartParseError> {
         // Jednostka NVMe to 1000 sektorów po 512 B.
         data_read_bytes: u128_at(data, 32).saturating_mul(1000 * SECTOR as u128),
         data_written_bytes: u128_at(data, 48).saturating_mul(1000 * SECTOR as u128),
+        host_read_commands: saturating_u64(u128_at(data, 64)),
+        host_write_commands: saturating_u64(u128_at(data, 80)),
         controller_busy_minutes: saturating_u64(u128_at(data, 96)),
         power_cycles: saturating_u64(u128_at(data, 112)),
         power_on_hours: saturating_u64(u128_at(data, 128)),
@@ -294,6 +301,18 @@ fn parse_ata_thresholds(sector: &[u8]) -> Vec<(u8, u8)> {
         .collect()
 }
 
+/// Ocena jednego atrybutu — ta sama reguła dla oceny dysku i dla kolumny
+/// „Ocena” w tabeli, żeby nie mogły się rozjechać.
+pub fn attribute_state(attribute: &AtaAttribute) -> Health {
+    if attribute.threshold_exceeded() {
+        return Health::Bad;
+    }
+    if SUSPICIOUS_ATTRIBUTE_IDS.contains(&attribute.id) && attribute.raw > 0 {
+        return Health::Warning;
+    }
+    Health::Good
+}
+
 /// Ocena stanu dysku ATA.
 ///
 /// Przekroczony próg producenta to od razu `Bad` — to sygnał, którym firmware
@@ -301,19 +320,11 @@ fn parse_ata_thresholds(sector: &[u8]) -> Vec<(u8, u8)> {
 /// sektory oczekujące, błędy CRC) dają `Warning`, bo pojedynczy incydent
 /// zwykle nie oznacza jeszcze końca dysku.
 pub fn ata_health(attributes: &[AtaAttribute]) -> Health {
-    if attributes.iter().any(AtaAttribute::threshold_exceeded) {
-        return Health::Bad;
-    }
-
-    let suspicious = attributes
+    attributes
         .iter()
-        .any(|attribute| attribute.raw > 0 && SUSPICIOUS_ATTRIBUTE_IDS.contains(&attribute.id));
-
-    if suspicious {
-        Health::Warning
-    } else {
-        Health::Good
-    }
+        .map(attribute_state)
+        .max()
+        .unwrap_or(Health::Good)
 }
 
 #[cfg(test)]
@@ -342,6 +353,8 @@ mod tests {
     #[test]
     fn parses_nvme_health_page() {
         let mut page = nvme_page(0, 273 + 41, 3, 2_000_000);
+        page[64..80].copy_from_slice(&456u128.to_le_bytes());
+        page[80..96].copy_from_slice(&789u128.to_le_bytes());
         page[112..128].copy_from_slice(&321u128.to_le_bytes());
         page[144..160].copy_from_slice(&7u128.to_le_bytes());
         page[200..202].copy_from_slice(&(273u16 + 38).to_le_bytes());
@@ -355,6 +368,8 @@ mod tests {
         assert_eq!(health.power_on_hours, 1_234);
         assert_eq!(health.power_cycles, 321);
         assert_eq!(health.unsafe_shutdowns, 7);
+        assert_eq!(health.host_read_commands, 456);
+        assert_eq!(health.host_write_commands, 789);
         // 2 000 000 jednostek × 1000 × 512 B = ~1,02 TB
         assert_eq!(health.data_written_bytes, 2_000_000u128 * 1000 * 512);
         // Zero w czujniku to brak pomiaru, nie 0 °C — numeracja zostaje.
@@ -509,6 +524,59 @@ mod tests {
         let attributes = ata_sector(&[(1, 100, 100, 12345), (7, 100, 100, 999), (9, 99, 99, 500)]);
         let parsed = parse_ata_attributes(&attributes, &thresholds_sector(&[])).expect("atrybuty");
         assert_eq!(ata_health(&parsed), Health::Good);
+    }
+
+    #[test]
+    fn attribute_state_matches_drive_verdict() {
+        let clean = AtaAttribute {
+            id: 5,
+            flags: 0,
+            value: 100,
+            worst: 100,
+            threshold: 10,
+            raw: 0,
+        };
+        assert_eq!(attribute_state(&clean), Health::Good);
+        // Ten sam atrybut z niezerowym licznikiem to ostrzeżenie.
+        assert_eq!(
+            attribute_state(&AtaAttribute { raw: 3, ..clean }),
+            Health::Warning
+        );
+        // Przekroczony próg wygrywa z licznikiem.
+        let exceeded = AtaAttribute {
+            id: 5,
+            flags: 0,
+            value: 10,
+            worst: 20,
+            threshold: 10,
+            raw: 8,
+        };
+        assert_eq!(attribute_state(&exceeded), Health::Bad);
+        // Atrybut bez reguły i bez progu nie może dostać ostrzeżenia.
+        let benign = AtaAttribute {
+            id: 1,
+            flags: 0,
+            value: 100,
+            worst: 100,
+            threshold: 0,
+            raw: 12_345,
+        };
+        assert_eq!(attribute_state(&benign), Health::Good);
+    }
+
+    #[test]
+    fn ata_health_of_empty_list_is_good() {
+        assert_eq!(ata_health(&[]), Health::Good);
+    }
+
+    #[test]
+    fn worst_attribute_decides_drive_verdict() {
+        let attributes = ata_sector(&[(5, 100, 100, 2), (197, 10, 20, 8)]);
+        let parsed =
+            parse_ata_attributes(&attributes, &thresholds_sector(&[(197, 10)])).expect("atrybuty");
+        assert_eq!(attribute_state(&parsed[0]), Health::Warning);
+        assert_eq!(attribute_state(&parsed[1]), Health::Bad);
+        assert_eq!(ata_health(&parsed), Health::Bad);
     }
 
     #[test]

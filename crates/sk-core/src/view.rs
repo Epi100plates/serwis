@@ -77,6 +77,14 @@ impl Section {
                 Block::Note { text_key, .. } | Block::Badge { text_key } => {
                     out.push(text_key.clone());
                 }
+                Block::Status {
+                    label_key,
+                    value_key,
+                    ..
+                } => {
+                    out.push(label_key.clone());
+                    out.push(value_key.clone());
+                }
                 // Etykiety serii są danymi („CPU 1”), nie tekstem interfejsu.
                 Block::Chart { chart } => out.push(chart.title_key.clone()),
             }
@@ -95,6 +103,13 @@ pub enum Block {
     Note { level: NoteLevel, text_key: String },
     /// Znacznik stanu, np. „wymaga administratora”.
     Badge { text_key: String },
+    /// Duży, kolorowany stan sekcji — np. „Stan dysku: Dobry”. Ma być pierwszą
+    /// rzeczą, którą widzi technik, dlatego nie jest zwykłym wierszem tabeli.
+    Status {
+        label_key: String,
+        value_key: String,
+        level: StatusLevel,
+    },
     /// Wykres liniowy — telemetria w czasie (Faza 1: `system.live`).
     Chart { chart: Chart },
 }
@@ -117,9 +132,40 @@ impl Block {
         }
     }
 
+    /// Stan sekcji: etykieta („Stan dysku”), wartość jako klucz i18n („Dobry”)
+    /// i poziom, który decyduje o kolorze w GUI i w raporcie HTML.
+    pub fn status(
+        label_key: impl Into<String>,
+        value_key: impl Into<String>,
+        level: StatusLevel,
+    ) -> Self {
+        Self::Status {
+            label_key: label_key.into(),
+            value_key: value_key.into(),
+            level,
+        }
+    }
+
     pub fn chart(chart: Chart) -> Self {
         Self::Chart { chart }
     }
+}
+
+/// Poziom stanu do wyróżnienia w widoku. To wyłącznie warstwa prezentacji —
+/// moduł sam decyduje, kiedy stan jest ostrzeżeniem, a kiedy awarią (np.
+/// `storage.smart` liczy go z progów SMART i liczników błędów).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusLevel {
+    /// Wszystko w porządku.
+    Ok,
+    /// Odchylenie: zużycie, liczniki błędów, obniżony zapas.
+    Warn,
+    /// Stan przedawaryjny lub awaria.
+    Bad,
+    /// Brak danych do oceny — nie zgadujemy.
+    #[default]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +254,10 @@ pub struct Table {
     /// Puste, gdy wszystkie komórki to dane; wtedy nie zaśmieca JSON-u.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub value_keys: Vec<Vec<Option<String>>>,
+    /// Poziom stanu pojedynczych komórek — renderer koloruje wtedy wartość.
+    /// Puste, gdy tabela nie ma wyróżnień; wtedy nie zaśmieca JSON-u.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_levels: Vec<Vec<Option<StatusLevel>>>,
 }
 
 impl Table {
@@ -216,6 +266,7 @@ impl Table {
             headers,
             rows,
             value_keys: Vec::new(),
+            cell_levels: Vec::new(),
         }
     }
 
@@ -233,11 +284,33 @@ impl Table {
         self
     }
 
+    /// Nadaje komórce poziom stanu (kolor wartości). Niezależne od `value_key`:
+    /// stan może być daną („86 %”) i nadal być wyróżniony kolorem.
+    pub fn with_cell_level(mut self, row: usize, column: usize, level: StatusLevel) -> Self {
+        while self.cell_levels.len() <= row {
+            self.cell_levels.push(Vec::new());
+        }
+        let cells = &mut self.cell_levels[row];
+        while cells.len() <= column {
+            cells.push(None);
+        }
+        cells[column] = Some(level);
+        self
+    }
+
     pub fn value_key(&self, row: usize, column: usize) -> Option<&str> {
         self.value_keys
             .get(row)
             .and_then(|cells| cells.get(column))
             .and_then(Option::as_deref)
+    }
+
+    pub fn cell_level(&self, row: usize, column: usize) -> Option<StatusLevel> {
+        self.cell_levels
+            .get(row)
+            .and_then(|cells| cells.get(column))
+            .copied()
+            .flatten()
     }
 }
 
@@ -374,6 +447,56 @@ mod tests {
         let table = Table::new(vec!["test.col".to_string()], vec![vec!["x".to_string()]]);
         let json = serde_json::to_value(table).expect("json");
         assert!(json.get("value_keys").is_none(), "{json}");
+    }
+
+    #[test]
+    fn status_block_collects_both_keys_and_has_kind_tag() {
+        let view = View::new(vec![Section::new("test.section").with_blocks(vec![
+            Block::status("test.status.label", "test.status.value", StatusLevel::Bad),
+        ])]);
+
+        assert!(view.uses_key("test.status.label"));
+        assert!(view.uses_key("test.status.value"));
+
+        let json = serde_json::to_value(&view).expect("json");
+        assert_eq!(json["sections"][0]["blocks"][0]["kind"], "status");
+        assert_eq!(json["sections"][0]["blocks"][0]["level"], "bad");
+        assert_eq!(
+            json["sections"][0]["blocks"][0]["value_key"],
+            "test.status.value"
+        );
+    }
+
+    #[test]
+    fn status_level_serializes_as_snake_case_and_defaults_to_unknown() {
+        for (level, expected) in [
+            (StatusLevel::Ok, "ok"),
+            (StatusLevel::Warn, "warn"),
+            (StatusLevel::Bad, "bad"),
+            (StatusLevel::Unknown, "unknown"),
+        ] {
+            let json = serde_json::to_value(level).expect("json");
+            assert_eq!(json, expected);
+            let back: StatusLevel = serde_json::from_value(json).expect("odczyt poziomu");
+            assert_eq!(back, level);
+        }
+        assert_eq!(StatusLevel::default(), StatusLevel::Unknown);
+    }
+
+    #[test]
+    fn cell_levels_color_single_cells_and_stay_out_of_json_when_unused() {
+        let table = Table::new(vec!["test.col".to_string()], vec![vec!["86 %".to_string()]])
+            .with_cell_level(0, 0, StatusLevel::Warn);
+        assert_eq!(table.cell_level(0, 0), Some(StatusLevel::Warn));
+        assert_eq!(table.cell_level(0, 1), None);
+        assert_eq!(table.cell_level(3, 0), None);
+
+        let json = serde_json::to_value(&table).expect("json");
+        assert_eq!(json["cell_levels"][0][0], "warn");
+
+        let plain = Table::new(vec!["test.col".to_string()], vec![vec!["x".to_string()]]);
+        let json = serde_json::to_value(&plain).expect("json");
+        assert!(json.get("cell_levels").is_none(), "{json}");
     }
 
     #[test]

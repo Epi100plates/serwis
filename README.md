@@ -6,6 +6,10 @@ Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GU
 
 ![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
 
+Stan dysków (SMART) w układzie jak CrystalDiskInfo: stan i temperatura każdego nośnika w przeglądzie, baner oceny, wskaźniki z logu zdrowia NVMe lub z atrybutów ATA i pełna tabela atrybutów z oceną każdego z nich:
+
+![Stan dysków (SMART) — przegląd, baner stanu i wskaźniki](docs/screenshot-smart.png)
+
 Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
 
 ## Dlaczego
@@ -24,7 +28,7 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 | `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
 | `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
 | `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
-| `storage.smart` | stan dysków: temperatura, zużycie, godziny pracy, zapisane dane, **atrybuty SMART ATA z tłumaczonymi nazwami**, strona zdrowia NVMe, ocena Dobry/Ostrzeżenie/Zły |
+| `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd (stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane), baner oceny, wskaźniki NVMe (zapas bloków, % zużycia, odczyt/zapis, komendy hosta, cykle, błędy medium) lub ATA (temperatura, zużycie, przealokowane/oczekujące/niepoprawne sektory, CRC), **pełna tabela atrybutów ATA z tłumaczonymi nazwami i oceną każdego atrybutu** |
 | `system.info` | wersja systemu, model komputera, RAM, uptime, czas lokalny, typ komputera, hypervisor, uprawnienia |
 | `system.live` | wykresy obciążenia CPU, taktowania i zużycia RAM — próbka co sekundę, historia 10 minut |
 

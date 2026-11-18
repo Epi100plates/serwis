@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, NoteLevel, View};
+use sk_core::view::{Block, Chart, NoteLevel, StatusLevel, View};
 
 use crate::report::{ModuleEntry, Report};
 
@@ -37,6 +37,20 @@ table.kv th { width: 34%; font-weight: 500; color: #33383d; }
 .note { margin: 6px 0; padding: 6px 10px; border-left: 3px solid #9bb7d4; background: #f7f9fb; }
 .note.warn { border-color: #d7a93b; background: #fdf8ec; }
 .note.error { border-color: #cc5f5f; background: #fdf0f0; }
+.status { display: flex; align-items: baseline; gap: 10px; margin: 8px 0;
+          padding: 6px 12px; border-left: 4px solid #9bb7d4; background: #f7f9fb; }
+.status .status-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #5b6167; }
+.status strong { font-size: 19px; }
+.status.lvl-ok { border-color: #2e9e5b; background: #f1faf4; }
+.status.lvl-ok strong { color: #1f7a45; }
+.status.lvl-warn { border-color: #d7a93b; }
+.status.lvl-warn strong { color: #8a6a12; }
+.status.lvl-bad { border-color: #cc5f5f; background: #fdf0f0; }
+.status.lvl-bad strong { color: #a52f2f; }
+.status.lvl-unknown strong { color: #5b6167; }
+td.lvl-ok { color: #1f7a45; }
+td.lvl-warn { color: #8a6a12; font-weight: 600; }
+td.lvl-bad { color: #a52f2f; font-weight: 700; }
 figure.chart { margin: 12px 0; }
 figure.chart figcaption { font-size: 12px; color: #5b6167; margin-bottom: 2px; }
 svg { max-width: 100%; height: auto; }
@@ -201,6 +215,19 @@ fn block_html(out: &mut String, block: &Block, translator: &Translator) {
                 escape(&translator.t(text_key))
             );
         }
+        Block::Status {
+            label_key,
+            value_key,
+            level,
+        } => {
+            let _ = writeln!(
+                out,
+                "<p class=\"status {}\"><span class=\"status-label\">{}</span><strong>{}</strong></p>",
+                level_class(*level),
+                escape(&translator.t(label_key)),
+                escape(&translator.t(value_key)),
+            );
+        }
         Block::Chart { chart } => {
             let _ = writeln!(
                 out,
@@ -228,11 +255,25 @@ fn table_html(out: &mut String, table: &sk_core::view::Table, translator: &Trans
                 Some(key) => translator.t(key),
                 None => row.get(column).cloned().unwrap_or_else(|| "-".to_string()),
             };
-            let _ = writeln!(out, "<td class=\"mono\">{}</td>", escape(&value));
+            let class = match table.cell_level(row_index, column) {
+                Some(level) => format!("mono {}", level_class(level)),
+                None => "mono".to_string(),
+            };
+            let _ = writeln!(out, "<td class=\"{class}\">{}</td>", escape(&value));
         }
         out.push_str("</tr>");
     }
     out.push_str("</tbody>\n</table>\n");
+}
+
+/// Nazwa klasy CSS dla poziomu stanu — wspólna dla banera i komórek tabeli.
+fn level_class(level: StatusLevel) -> &'static str {
+    match level {
+        StatusLevel::Ok => "lvl-ok",
+        StatusLevel::Warn => "lvl-warn",
+        StatusLevel::Bad => "lvl-bad",
+        StatusLevel::Unknown => "lvl-unknown",
+    }
 }
 
 /// Wykres jako inline SVG — bez JavaScriptu, więc raport działa z dysku.
@@ -381,7 +422,7 @@ mod tests {
     use crate::report::ReportOptions;
     use sk_core::live::LiveSample;
     use sk_core::testing::{Harness, MockLive, MockWmi};
-    use sk_core::view::{ChartSeries, KeyValue, Section};
+    use sk_core::view::{ChartSeries, KeyValue, Section, Table};
 
     fn report() -> Report {
         let wmi = MockWmi::new()
@@ -507,6 +548,40 @@ mod tests {
         let mut html = String::new();
         view_html(&mut html, &view, &translator);
         assert!(html.contains(">Tak<"), "{html}");
+    }
+
+    #[test]
+    fn status_block_renders_colored_banner() {
+        let translator = Translator::load().expect("tłumaczenia");
+        let view = View::new(vec![
+            Section::new("module.storage_smart.section.drive").with_blocks(vec![Block::status(
+                "module.storage_smart.drive.health",
+                "module.storage_smart.health.bad",
+                StatusLevel::Bad,
+            )]),
+        ]);
+        let mut html = String::new();
+        view_html(&mut html, &view, &translator);
+        assert!(html.contains("<p class=\"status lvl-bad\">"), "{html}");
+        assert!(html.contains("<strong>Zły</strong>"), "{html}");
+        assert!(html.contains("Stan dysku"), "{html}");
+    }
+
+    #[test]
+    fn table_cells_with_level_get_css_class() {
+        let translator = Translator::load().expect("tłumaczenia");
+        let table = Table::new(
+            vec!["module.storage_smart.ata.col.name".to_string()],
+            vec![vec!["x".to_string()], vec!["y".to_string()]],
+        )
+        .with_cell_level(0, 0, StatusLevel::Warn);
+        let mut html = String::new();
+        table_html(&mut html, &table, &translator);
+        assert!(
+            html.contains("<td class=\"mono lvl-warn\">x</td>"),
+            "{html}"
+        );
+        assert!(html.contains("<td class=\"mono\">y</td>"), "{html}");
     }
 
     #[test]

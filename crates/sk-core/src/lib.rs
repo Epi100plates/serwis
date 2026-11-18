@@ -29,6 +29,6 @@ pub mod prelude {
     pub use crate::queries;
     pub use crate::registry::ModuleRegistry;
     pub use crate::view::{
-        Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, Table, View,
+        Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, StatusLevel, Table, View,
     };
 }

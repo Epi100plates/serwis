@@ -13,6 +13,7 @@
   "module.storage_smart.attr.13": "Soft read error rate",
   "module.storage_smart.attr.22": "Helium level",
   "module.storage_smart.attr.160": "Uncorrectable error count",
+  "module.storage_smart.attr.177": "Wear leveling count",
   "module.storage_smart.attr.183": "Runtime bad block",
   "module.storage_smart.attr.184": "End-to-end error",
   "module.storage_smart.attr.187": "Reported uncorrectable errors",

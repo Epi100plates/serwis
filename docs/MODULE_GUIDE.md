@@ -126,6 +126,7 @@ pub enum Block {
     Table { table: Table },                     // nagłówki (klucze i18n) + wiersze (dane)
     Note { level: NoteLevel, text_key: String },// Info | Warn | Error — degradacja, brak danych
     Badge { text_key: String },                 // np. "Administrator", "Niedostępne przez USB"
+    Status { label_key, value_key, level },     // duży stan sekcji: „Stan dysku: Dobry”
     Chart { chart: Chart },                     // wykres liniowy (Faza 1: system.live)
 }
 
@@ -138,7 +139,8 @@ pub struct KeyValue {
 pub struct Table {
     pub headers: Vec<String>,          // klucze i18n
     pub rows: Vec<Vec<String>>,        // dane
-    pub value_keys: Vec<Vec<Option<String>>>, // klucze i18n dla pojedynczych komórek
+    pub value_keys: Vec<Vec<Option<String>>>,    // klucze i18n dla pojedynczych komórek
+    pub cell_levels: Vec<Vec<Option<StatusLevel>>>, // kolory pojedynczych komórek
 }
 
 pub struct Chart {
@@ -152,6 +154,8 @@ pub struct Chart {
 Reguła rozróżniania tekstu i danych: **kluczem i18n jest wszystko, co jest zdaniem lub etykietą** (nazwy sekcji, nagłówki tabel, etykiety wierszy, komunikaty, wartości logiczne). **Daną jest to, co przyszło z WMI lub z obliczeń** (nazwa procesora, numer seryjny, „3200 MHz”, „2010‑W46”). Nie wpisuj do wartości słów typu „tydzień” — wybierz format neutralny językowo (ISO 8601) albo użyj `value_key`.
 
 Dla stanów w **tabeli** użyj `Table::with_value_key(row, column, "common.value.digital")` — komórka jest wtedy tłumaczona tak samo jak `KeyValue::state`. Przykład: kolumna „Wejście” w `hw.monitor` (cyfrowe/analogowe) i kolumna stanu w `hw.disk_inventory`.
+
+Dla **wyróżnienia kolorem** użyj `Table::with_cell_level(row, column, StatusLevel::Warn)` (`Ok | Warn | Bad | Unknown`) — niezależnie od `value_key`, bo dana może być jednocześnie liczbą i ostrzeżeniem („86 %”). Duży nagłówek stanu to `Block::status("…label", "…wartość", StatusLevel::Ok)` — renderuje się jako kolorowy baner w GUI i wyróżniony akapit w HTML. Kolory są wspólne dla obu rendererów, żeby „Dobry” znaczyło to samo w aplikacji i w raporcie.
 
 Zapytania o klasy używane w więcej niż jednym module trzymamy w `sk_core::queries` (np. `WIN32_VIDEO_CONTROLLER`, `PROCESSOR_PERFORMANCE`). Cache WMI jest kluczowany po `(przestrzeń nazw, zapytanie)`, więc dwie różne listy pól tej samej klasy to dwa zapytania w rundzie — jedna stała = jedno zapytanie.
 
@@ -365,7 +369,10 @@ Reguły, których oczekuje review:
 - **Brak uprawnień to nie błąd modułu.** `AccessDenied` → `Block::note(NoteLevel::Warn, "…note.elevation")` plus stan „nieznane” w tabeli; `collect()` zwraca `Ok`.
 - **Awaria jednego dysku nie zabiera raportu.** Błąd `smart()` zapisujesz przy konkretnym dysku (dane JSON `error.kind`), a nie jako `Err` całego modułu.
 - **Nie interpretuj surowych liczników bez wiedzy.** Znaczenie mają atrybuty z `SUSPICIOUS_ATTRIBUTE_IDS` (5, 10, 184, 187, 188, 196, 197, 198, 199); atrybuty 1 i 7 mają surowe wartości niezerowe także na zdrowym dysku.
-- **Ocena stanu jest jawna** (`Health::Good/Warning/Bad`) i pokazana jako `value_key` (`module.storage_smart.health.*`), nie jako kolor bez wyjaśnienia.
+- **Ocena stanu jest jawna** (`Health::Good/Warning/Bad`) i pokazana jako `value_key` (`module.storage_smart.health.*`) plus kolor (`StatusLevel`), nie jako kolor bez wyjaśnienia.
+- **Układ sekcji dysku jest stały** (jak w CrystalDiskInfo): `Block::status` ze stanem → notki (ostrzeżenia NVMe, przekroczony próg, brak uprawnień) → wskaźniki (`nvme_rows` / `ata_rows`) → tożsamość nośnika → pełna tabela atrybutów ATA z kolumną „Ocena”. Wskaźniki ATA liczy `ata_rows` z atrybutów (5, 9, 12, 177/231/233, 194, 197, 198, 199, 241, 242), więc technik widzi je bez przewijania 30 wierszy tabeli.
+- **Ocena pojedynczego atrybutu to ta sama reguła, co ocena dysku** (`smart::attribute_state`): przekroczony próg → `Bad`, niezerowy licznik z `SUSPICIOUS_ATTRIBUTE_IDS` → `Warning`, inaczej `Good`. Nie duplikuj tej logiki w module — inaczej kolumna „Ocena” rozjedzie się z banerem.
+- **Liczniki ATA w LBA przeliczaj przez `BytesPerSector`** z `Win32_DiskDrive` (atrybuty 241/242), a nie przez stałe 512 B — dysk 4Kn inaczej pokaże czterokrotnie zaniżone dane.
 
 ---
 

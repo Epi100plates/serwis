@@ -310,11 +310,12 @@ Zrealizowane:
 
 - `sk-win/src/storage.rs`: `WinStorage` (trait `StorageProbe`). Deskryptor urządzenia (`IOCTL_STORAGE_QUERY_PROPERTY`: magistrala, nośnik wymienny, `IncursSeekPenalty` → SSD/HDD), strona logu zdrowia NVMe (log page 0x02 przez `StorageDeviceProtocolSpecificProperty` z fallbackiem na poziom adaptera) i SMART ATA **dwiema ścieżkami**: `IOCTL_ATA_PASS_THROUGH` oraz klasyczny `SMART_RCV_DRIVE_DATA`. Wszystkie uchwyty zamykane w `Drop`, `unsafe` wyłącznie tutaj.
 - `sk-modules/src/smart.rs`: parsery NVMe (offsety logu, kelwiny→°C, jednostki 1000×512 B) i ATA (30 atrybutów × 12 B, progi z osobnego sektora), ocena stanu (`Good`/`Warning`/`Bad`) z jawnymi regułami: przekroczony próg producenta = `Bad`; niezerowe liczniki `SUSPICIOUS_ATTRIBUTE_IDS` (5, 10, 184, 187, 188, 196, 197, 198, 199) = `Warning`; NVMe: bity critical warning (degradacja/read-only = `Bad`, reszta = `Warning`), % zużycia ≥ 80 %, błędy medium, zapas bloków (100 % zużycia to wyczerpany zapas projektowy, nie awaria — zgodnie ze specyfikacją NVMe).
-- `storage.smart`: przegląd wszystkich dysków (model, magistrala, typ, stan, temperatura, godziny pracy, zapisane dane) + sekcja na dysk (tożsamość, szczegóły NVMe, tabela atrybutów ATA z **58 przetłumaczonymi nazwami**, nieznane atrybuty producenta jako „Atrybut producenta”). `Capability::Elevated`.
+- `storage.smart`: przegląd wszystkich dysków (model, stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane) + sekcja na dysk w układzie CrystalDiskInfo: **baner stanu** (`Block::status`, kolor zależny od oceny), wskaźniki z logu zdrowia NVMe albo wyliczone z atrybutów ATA (temperatura, zużycie, godziny, cykle zasilania, przealokowane/oczekujące/niepoprawne sektory, błędy CRC, odczytane i zapisane dane), tożsamość nośnika i pełna tabela atrybutów ATA z **59 przetłumaczonymi nazwami**, kolumną „Ocena” (OK / Uwaga / Zły, kolorowana per wiersz) i nieznanymi atrybutami producenta jako „Atrybut producenta”. `Capability::Elevated`.
 - Degradacja bez wyjątku: brak admina → stan „Nieznane” + notka o uprawnieniach; mostek USB/kontroler RAID → notka informacyjna; czytnik bez nośnika → pomijany bez IOCTL; awaria jednego dysku nie psuje raportu.
-- Testy: 43 nowe (parsery na budowanych buforach, moduł na `MockStorage`, 2 nowe testy makiet w `sk-core`, 7 testów warstwy Windows z testem układu ABI, golden `storage_smart_view.json`, 2 testy sprzętowe `#[ignore]`). Razem **175 testów zielonych, 6 `#[ignore]`**.
+- Kontrakt widoku rozszerzony o `Block::Status` i `Table::cell_levels` (kolory komórek) — wspólne dla GUI i raportu HTML; tabele szersze niż okno przewijają się poziomo zamiast ucinać kolumny.
+- Testy: 43 nowe przy pierwszym przyroście SMART + 15 przy przebudowie widoku (parsery na budowanych buforach, moduł na `MockStorage`, 2 nowe testy makiet w `sk-core`, 7 testów warstwy Windows z testem układu ABI, golden `storage_smart_view.json`, 2 testy sprzętowe `#[ignore]`). Razem **190 testów zielonych, 6 `#[ignore]`**.
 
-**Dowód z tej maszyny (release z manifestem, `serwiskit report --json/--html`):** 11 modułów, 0 błędów, cache WMI 2 trafienia/16 zapytań (współdzielone `Win32_DiskDrive`).
+**Dowód z tej maszyny (release z manifestem, `serwiskit report --json/--html`):** 11 modułów, 0 błędów, cache WMI 2 trafienia/16 zapytań (współdzielone `Win32_DiskDrive`). Zrzut nowego widoku: `docs/screenshot-smart.png`.
 
 | Dysk | Wynik |
 |---|---|
@@ -331,6 +332,7 @@ Zrealizowane:
 | tylko odczyt SMART | po nieudanym odczycie jedna próba `SMART ENABLE` | część dysków ma SMART wyłączony w firmware (np. po secure erase); polecenie jest odwracalne i nie dotyka danych |
 | fixtures SMART z prawdziwego dysku | syntetyczne bufory budowane w testach | odczyt wymaga administratora, więc fixture w CI byłby nieodtwarzalny; kształt danych pilnuje golden + testy parserów |
 | ocena stanu „jak CrystalDiskInfo” | własne, jawne reguły w `smart.rs` | brak licencji na kopiowanie progów; reguły są opisane w kodzie i testach |
+| wygląd „jak CrystalDiskInfo” | odtworzony układ (baner stanu, wskaźniki, tabela atrybutów z oceną), bez kodu i zasobów CDI | CrystalDiskInfo jest freeware, nie GPL — kopiujemy pomysł na układ, nie implementację |
 
 **Pozostałe w Fazie 2:** `storage.bench` (mapa prędkości, 4K, czas dostępu), `storage.surface`, `storage.write_test` (`Destructive`) i `TaskDescriptor` (postęp/anulowanie).
 

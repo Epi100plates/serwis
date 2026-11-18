@@ -103,6 +103,9 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 - Trait `StorageProbe` w `CollectCtx` (`describe`, `smart`), makiety `MockStorage` (`with_nvme`, `with_ata`, `with_denied`, `with_unavailable`). Parsery w `sk-modules/src/smart.rs`, transport w `sk-win/src/storage.rs`. Moduł `storage.smart` ma `Capability::Elevated`.
 - `Win32_DiskDrive` jest czytane przez `queries::WIN32_DISK_DRIVE` w `hw.disk_inventory` i `storage.smart` — jedna stała = jedno zapytanie w rundzie.
 - Program uruchomiony jako administrator (`requireAdministrator` z manifestu release) widzi dyski; `cargo test` bez podniesienia nie. Testy sprzętowe dysków muszą akceptować oba warianty (asercja na `elevated` w danych), a nie zakładać dane.
+- Widok `storage.smart` jest w układzie CrystalDiskInfo: sekcja przeglądu (dysk, stan, temperatura, magistrala, typ, zużycie, godziny, zapisane dane) + sekcja na dysk: `Block::status` (duży, kolorowany stan) → notki → wskaźniki (`nvme_rows` z logu zdrowia / `ata_rows` wyliczone z atrybutów) → tożsamość → pełna tabela atrybutów ATA z kolumną „Ocena”. Kolory: `StatusLevel` (`Ok`/`Warn`/`Bad`/`Unknown`) w `Block::status` i `Table::with_cell_level`; mapowanie kolorów jest jedno (`sk-app/src/render.rs::status_color` dla GUI, klasy `lvl-*` w HTML).
+- Ocena pojedynczego atrybutu = ta sama funkcja co ocena dysku (`smart::attribute_state`, agregacja `max`), inaczej kolumna „Ocena” rozjedzie się z banerem. Liczniki LBA ATA (atrybuty 241/242) mnożymy przez `BytesPerSector` z `Win32_DiskDrive`, nie przez stałe 512 B.
+- Tabele w GUI są w `ScrollArea::horizontal` — szeroka tabela przewija się, zamiast ucinać kolumny poza ekranem (okno startuje z 1180×780 px, panel modułów 280 px).
 
 **PowerShell w tym środowisku (5.1, tylko `powershell.exe`):**
 

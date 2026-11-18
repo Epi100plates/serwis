@@ -7,7 +7,7 @@
 use serde::Deserialize;
 use sk_core::prelude::*;
 
-use crate::smart::{self, AtaAttribute, Health, KNOWN_ATTRIBUTE_IDS, NvmeHealth};
+use crate::smart::{self, AtaAttribute, Health, KNOWN_ATTRIBUTE_IDS, NvmeHealth, attribute_state};
 use crate::util::{boolean_key, decode_all, format_bytes, number, text, trimmed};
 
 /// Wszystkie napędy z WMI — ten sam zestaw pól czyta `hw.disk_inventory`,
@@ -28,6 +28,9 @@ struct DiskDrive {
     size_bytes: Option<u64>,
     #[serde(rename = "InterfaceType", default)]
     interface_type: Option<String>,
+    /// Rozmiar sektora logicznego — liczniki LBA ATA trzeba na niego przemnożyć.
+    #[serde(rename = "BytesPerSector", default)]
+    bytes_per_sector: Option<u32>,
 }
 
 /// Co udało się ustalić o jednym dysku — razem z powodem braku danych.
@@ -38,6 +41,7 @@ struct DriveReport {
     firmware: String,
     size_bytes: Option<u64>,
     interface_type: String,
+    bytes_per_sector: u32,
     bus: BusKind,
     kind: DriveKind,
     removable: bool,
@@ -59,6 +63,11 @@ impl DriveReport {
             firmware: text(disk.firmware.as_deref()),
             size_bytes: disk.size_bytes,
             interface_type: text(disk.interface_type.as_deref()),
+            // 512 B to domyślny sektor logiczny; zero z WMI nic nie znaczy.
+            bytes_per_sector: disk
+                .bytes_per_sector
+                .filter(|bytes| *bytes > 0)
+                .unwrap_or(512),
             bus: BusKind::Unknown,
             kind: DriveKind::Unknown,
             removable: false,
@@ -86,19 +95,50 @@ impl DriveReport {
         self.nvme
             .as_ref()
             .map(|health| health.power_on_hours)
-            .or_else(|| {
-                self.ata
-                    .as_deref()
-                    .and_then(|attributes| ata_raw(attributes, 9))
-                    .map(|raw| raw & 0xFFFF_FFFF)
-            })
+            .or_else(|| self.ata_raw(9).map(|raw| raw & 0xFFFF_FFFF))
     }
 
+    fn power_cycles(&self) -> Option<u64> {
+        self.nvme
+            .as_ref()
+            .map(|health| health.power_cycles)
+            .or_else(|| self.ata_raw(12).map(|raw| raw & 0xFFFF_FFFF))
+    }
+
+    /// Zużycie nośnika w procentach: NVMe podaje je wprost, ATA w atrybucie
+    /// 177/231/233 jako pozostałe życie (100 = nowy dysk).
+    fn wear_percent(&self) -> Option<u8> {
+        self.nvme
+            .as_ref()
+            .map(|health| health.percentage_used)
+            .or_else(|| self.ata.as_deref().and_then(ata_wear_percent))
+    }
+
+    /// Zapisane dane: NVMe w bajtach, ATA jako licznik LBA atrybutu 241.
     fn written_bytes(&self) -> Option<u64> {
-        let nvme = self.nvme.as_ref()?;
-        // Zero w liczniku NVMe znaczy „nie raportowano”, a nie zero bajtów.
-        (nvme.data_written_bytes > 0)
-            .then(|| nvme.data_written_bytes.min(u128::from(u64::MAX)) as u64)
+        if let Some(health) = self.nvme.as_ref() {
+            // Zero w liczniku NVMe znaczy „nie raportowano”, a nie zero bajtów.
+            return (health.data_written_bytes > 0)
+                .then(|| health.data_written_bytes.min(u128::from(u64::MAX)) as u64);
+        }
+        self.ata_raw(241)
+            .and_then(|lba| lba.checked_mul(u64::from(self.bytes_per_sector)))
+    }
+
+    /// Odczytane dane: to samo, ale z atrybutu 242 po stronie ATA.
+    fn read_bytes(&self) -> Option<u64> {
+        if let Some(health) = self.nvme.as_ref() {
+            return (health.data_read_bytes > 0)
+                .then(|| health.data_read_bytes.min(u128::from(u64::MAX)) as u64);
+        }
+        self.ata_raw(242)
+            .and_then(|lba| lba.checked_mul(u64::from(self.bytes_per_sector)))
+    }
+
+    fn ata_raw(&self, id: u8) -> Option<u64> {
+        self.ata
+            .as_deref()
+            .and_then(|attributes| ata_raw(attributes, id))
     }
 }
 
@@ -198,46 +238,9 @@ impl Module for StorageSmart {
 impl StorageSmart {
     fn render(&self, ctx: &CollectCtx<'_>, reports: &[DriveReport]) -> ModuleOutput {
         let elevated = ctx.host.is_elevated();
-        let mut overview = Table::new(
-            vec![
-                "module.storage_smart.col.drive".to_string(),
-                "module.storage_smart.col.bus".to_string(),
-                "module.storage_smart.col.kind".to_string(),
-                "module.storage_smart.col.health".to_string(),
-                "module.storage_smart.col.temperature".to_string(),
-                "module.storage_smart.col.hours".to_string(),
-                "module.storage_smart.col.written".to_string(),
-            ],
-            reports
-                .iter()
-                .map(|report| {
-                    vec![
-                        report.model.clone(),
-                        bus_label(report.bus).to_string(),
-                        String::new(),
-                        String::new(),
-                        report
-                            .temperature_c()
-                            .map_or_else(|| "-".to_string(), |value| format!("{value} °C")),
-                        report
-                            .power_on_hours()
-                            .map_or_else(|| "-".to_string(), |hours| format!("{hours} h")),
-                        report
-                            .written_bytes()
-                            .map_or_else(|| "-".to_string(), format_bytes),
-                    ]
-                })
-                .collect(),
-        );
-        for (row, report) in reports.iter().enumerate() {
-            overview = overview.with_value_key(row, 2, kind_key(report.kind));
-            overview = overview.with_value_key(row, 3, health_key(report.health));
-            if report.bus == BusKind::Unknown {
-                overview = overview.with_value_key(row, 1, "common.value.unknown");
-            }
-        }
-
-        let mut overview_blocks = vec![Block::Table { table: overview }];
+        let mut overview_blocks = vec![Block::Table {
+            table: overview_table(reports),
+        }];
         if !elevated {
             overview_blocks.push(Block::note(
                 NoteLevel::Warn,
@@ -258,68 +261,7 @@ impl StorageSmart {
             vec![Section::new("module.storage_smart.section").with_blocks(overview_blocks)];
 
         for report in reports {
-            let mut section = Section::new("module.storage_smart.section.drive");
-            section.subtitle = Some(format!(
-                "{} · \\\\.\\PhysicalDrive{}",
-                report.model, report.index
-            ));
-            let mut blocks = vec![Block::key_values(drive_rows(report))];
-
-            if report.no_medium {
-                blocks.push(Block::note(
-                    NoteLevel::Info,
-                    "module.storage_smart.note.no_media",
-                ));
-            } else {
-                match &report.error {
-                    Some(ModuleError::AccessDenied { .. }) => blocks.push(Block::note(
-                        NoteLevel::Error,
-                        "module.storage_smart.note.denied",
-                    )),
-                    Some(ModuleError::Unavailable { .. }) => blocks.push(Block::note(
-                        NoteLevel::Info,
-                        "module.storage_smart.note.unavailable",
-                    )),
-                    Some(_) => blocks.push(Block::note(
-                        NoteLevel::Error,
-                        "module.storage_smart.note.failed",
-                    )),
-                    None => {}
-                }
-            }
-
-            if let Some(health) = &report.nvme {
-                for warning in health.warnings() {
-                    blocks.push(Block::note(NoteLevel::Warn, warning.key()));
-                }
-                blocks.push(Block::key_values(nvme_rows(health)));
-            }
-
-            if let Some(attributes) = &report.ata {
-                match report.health {
-                    // Przekroczony próg producenta to stan przedawaryjny.
-                    Some(Health::Bad)
-                        if attributes.iter().any(AtaAttribute::threshold_exceeded) =>
-                    {
-                        blocks.push(Block::note(
-                            NoteLevel::Error,
-                            "module.storage_smart.note.threshold_exceeded",
-                        ));
-                    }
-                    // Ostrzeżenie przy ATA zawsze pochodzi z niezerowych liczników.
-                    Some(Health::Warning) => blocks.push(Block::note(
-                        NoteLevel::Warn,
-                        "module.storage_smart.note.counters",
-                    )),
-                    _ => {}
-                }
-                blocks.push(Block::Table {
-                    table: attribute_table(attributes),
-                });
-            }
-
-            section.blocks = blocks;
-            sections.push(section);
+            sections.push(drive_section(report));
         }
 
         let data = serde_json::json!({
@@ -336,15 +278,160 @@ impl StorageSmart {
     }
 }
 
-/// Wiersze tożsamości dysku — wspólne dla NVMe i ATA.
+/// Przegląd wszystkich nośników: jedna tabela, w której stan i zużycie są
+/// wyróżnione kolorem, a temperatury i godziny pracy widoczne bez wchodzenia
+/// w szczegóły dysku.
+fn overview_table(reports: &[DriveReport]) -> Table {
+    let mut table = Table::new(
+        vec![
+            "module.storage_smart.col.drive".to_string(),
+            "module.storage_smart.col.health".to_string(),
+            "module.storage_smart.col.temperature".to_string(),
+            "module.storage_smart.col.bus".to_string(),
+            "module.storage_smart.col.kind".to_string(),
+            "module.storage_smart.col.wear".to_string(),
+            "module.storage_smart.col.hours".to_string(),
+            "module.storage_smart.col.written".to_string(),
+        ],
+        reports
+            .iter()
+            .map(|report| {
+                vec![
+                    report.model.clone(),
+                    String::new(),
+                    report
+                        .temperature_c()
+                        .map_or_else(|| "-".to_string(), |value| format!("{value} °C")),
+                    bus_label(report.bus).to_string(),
+                    String::new(),
+                    report
+                        .wear_percent()
+                        .map_or_else(|| "-".to_string(), |value| format!("{value} %")),
+                    report
+                        .power_on_hours()
+                        .map_or_else(|| "-".to_string(), |hours| format!("{hours} h")),
+                    report
+                        .written_bytes()
+                        .map_or_else(|| "-".to_string(), format_bytes),
+                ]
+            })
+            .collect(),
+    );
+
+    for (row, report) in reports.iter().enumerate() {
+        table = table.with_value_key(row, 4, kind_key(report.kind));
+        table = table.with_value_key(row, 1, health_key(report.health));
+        if report.bus == BusKind::Unknown {
+            table = table.with_value_key(row, 3, "common.value.unknown");
+        }
+        // Brak danych też jest informacją: „Nieznane” dostaje szary, żeby nie
+        // wyglądało jak potwierdzony dobry stan.
+        table = table.with_cell_level(
+            row,
+            1,
+            health_level(report.health).unwrap_or(StatusLevel::Unknown),
+        );
+        // Zużycie od 80 % to sygnał, że nośnik zbliża się do końca zapasu.
+        if let Some(wear) = report.wear_percent() {
+            let level = if wear >= 80 {
+                StatusLevel::Warn
+            } else {
+                StatusLevel::Ok
+            };
+            table = table.with_cell_level(row, 5, level);
+        }
+    }
+    table
+}
+
+/// Sekcja jednego dysku w układzie CrystalDiskInfo: najpierw duży stan, potem
+/// wskaźniki z logu zdrowia (NVMe) albo z atrybutów (ATA), dalej tożsamość
+/// nośnika i na końcu pełna tabela atrybutów z oceną każdego z nich.
+fn drive_section(report: &DriveReport) -> Section {
+    let mut section = Section::new("module.storage_smart.section.drive");
+    section.subtitle = Some(format!(
+        "{} · \\\\.\\PhysicalDrive{}",
+        report.model, report.index
+    ));
+
+    let mut blocks = vec![Block::status(
+        "module.storage_smart.drive.health",
+        health_key(report.health),
+        health_level(report.health).unwrap_or(StatusLevel::Unknown),
+    )];
+
+    if report.no_medium {
+        blocks.push(Block::note(
+            NoteLevel::Info,
+            "module.storage_smart.note.no_media",
+        ));
+    } else {
+        match &report.error {
+            Some(ModuleError::AccessDenied { .. }) => blocks.push(Block::note(
+                NoteLevel::Error,
+                "module.storage_smart.note.denied",
+            )),
+            Some(ModuleError::Unavailable { .. }) => blocks.push(Block::note(
+                NoteLevel::Info,
+                "module.storage_smart.note.unavailable",
+            )),
+            Some(_) => blocks.push(Block::note(
+                NoteLevel::Error,
+                "module.storage_smart.note.failed",
+            )),
+            None => {}
+        }
+    }
+
+    if let Some(health) = &report.nvme {
+        // Bity krytyczne opisujemy słowami — sam kod 0x0c nic technikowi nie mówi.
+        for warning in health.warnings() {
+            blocks.push(Block::note(NoteLevel::Warn, warning.key()));
+        }
+        blocks.push(Block::key_values(nvme_rows(health)));
+    }
+
+    if let Some(attributes) = report.ata.as_deref() {
+        match report.health {
+            // Przekroczony próg producenta to stan przedawaryjny.
+            Some(Health::Bad) if attributes.iter().any(AtaAttribute::threshold_exceeded) => {
+                blocks.push(Block::note(
+                    NoteLevel::Error,
+                    "module.storage_smart.note.threshold_exceeded",
+                ));
+            }
+            // Ostrzeżenie przy ATA zawsze pochodzi z niezerowych liczników.
+            Some(Health::Warning) => blocks.push(Block::note(
+                NoteLevel::Warn,
+                "module.storage_smart.note.counters",
+            )),
+            _ => {}
+        }
+        blocks.push(Block::key_values(ata_rows(attributes, report)));
+    }
+
+    blocks.push(Block::key_values(drive_rows(report)));
+
+    if let Some(attributes) = report.ata.as_deref() {
+        blocks.push(Block::Table {
+            table: attribute_table(attributes),
+        });
+    }
+
+    section.blocks = blocks;
+    section
+}
+
+/// Wiersze tożsamości dysku — wspólne dla NVMe i ATA. Stan dysku nie jest tu
+/// powtarzany: pokazuje go baner nad wskaźnikami.
 fn drive_rows(report: &DriveReport) -> Vec<KeyValue> {
     vec![
         KeyValue::new("module.storage_smart.drive.model", report.model.clone()),
-        KeyValue::new("module.storage_smart.drive.serial", report.serial.clone()),
         KeyValue::new(
             "module.storage_smart.drive.firmware",
             report.firmware.clone(),
         ),
+        KeyValue::new("module.storage_smart.drive.serial", report.serial.clone()),
         KeyValue::new(
             "module.storage_smart.drive.size",
             report
@@ -358,17 +445,14 @@ fn drive_rows(report: &DriveReport) -> Vec<KeyValue> {
         bus_row(report.bus),
         KeyValue::state("module.storage_smart.drive.kind", kind_key(report.kind)),
         KeyValue::state(
-            "module.storage_smart.drive.health",
-            health_key(report.health),
-        ),
-        KeyValue::state(
             "module.storage_smart.drive.removable",
             boolean_key(report.removable),
         ),
     ]
 }
 
-/// Szczegóły NVMe ze strony logu zdrowia.
+/// Szczegóły NVMe ze strony logu zdrowia — kolejność jak w CrystalDiskInfo,
+/// od stanu i temperatury do liczników błędów.
 fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
     let mut rows = vec![
         KeyValue::new(
@@ -376,7 +460,7 @@ fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
             format!("0x{:02x}", health.critical_warning),
         ),
         KeyValue::new(
-            "module.storage_smart.nvme.temperature",
+            "module.storage_smart.ind.temperature",
             health
                 .temperature_c
                 .map_or_else(|| "-".to_string(), |value| format!("{value} °C")),
@@ -398,19 +482,27 @@ fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
             format!("{} %", health.percentage_used),
         ),
         KeyValue::new(
-            "module.storage_smart.nvme.data_read",
+            "module.storage_smart.ind.data_read",
             reported_bytes(health.data_read_bytes),
         ),
         KeyValue::new(
-            "module.storage_smart.nvme.data_written",
+            "module.storage_smart.ind.data_written",
             reported_bytes(health.data_written_bytes),
         ),
         KeyValue::new(
-            "module.storage_smart.nvme.power_on_hours",
+            "module.storage_smart.nvme.host_read",
+            number(Some(health.host_read_commands)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.nvme.host_write",
+            number(Some(health.host_write_commands)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ind.power_on_hours",
             format!("{} h", health.power_on_hours),
         ),
         KeyValue::new(
-            "module.storage_smart.nvme.power_cycles",
+            "module.storage_smart.ind.power_cycles",
             number(Some(health.power_cycles)),
         ),
         KeyValue::new(
@@ -442,9 +534,65 @@ fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
     rows
 }
 
-/// Tabela atrybutów ATA. Nazwy atrybutów są kluczami i18n w komórkach, więc
-/// tłumaczą się razem z interfejsem, a nieprogowe atrybuty producenta dostają
-/// wspólną etykietę „atrybut producenta”.
+/// Wskaźniki ATA wyliczone z atrybutów — te same liczby, których technik szuka
+/// w CrystalDiskInfo, zebrane nad pełną tabelą atrybutów.
+fn ata_rows(attributes: &[AtaAttribute], report: &DriveReport) -> Vec<KeyValue> {
+    vec![
+        KeyValue::new(
+            "module.storage_smart.ind.temperature",
+            report
+                .temperature_c()
+                .map_or_else(|| "-".to_string(), |value| format!("{value} °C")),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ata.wear",
+            report
+                .wear_percent()
+                .map_or_else(|| "-".to_string(), |value| format!("{value} %")),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ind.power_on_hours",
+            report
+                .power_on_hours()
+                .map_or_else(|| "-".to_string(), |hours| format!("{hours} h")),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ind.power_cycles",
+            number(report.power_cycles()),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ata.reallocated",
+            number(ata_raw(attributes, 5)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ata.pending",
+            number(ata_raw(attributes, 197)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ata.uncorrectable",
+            number(ata_raw(attributes, 198)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ata.crc",
+            number(ata_raw(attributes, 199)),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ind.data_read",
+            report
+                .read_bytes()
+                .map_or_else(|| "-".to_string(), format_bytes),
+        ),
+        KeyValue::new(
+            "module.storage_smart.ind.data_written",
+            report
+                .written_bytes()
+                .map_or_else(|| "-".to_string(), format_bytes),
+        ),
+    ]
+}
+
+/// Tabela atrybutów ATA: nazwy w komórkach są kluczami i18n, a kolumna „Ocena”
+/// dostaje kolor z tej samej reguły, która liczy stan całego dysku.
 fn attribute_table(attributes: &[AtaAttribute]) -> Table {
     let mut table = Table::new(
         vec![
@@ -454,6 +602,7 @@ fn attribute_table(attributes: &[AtaAttribute]) -> Table {
             "module.storage_smart.ata.col.worst".to_string(),
             "module.storage_smart.ata.col.threshold".to_string(),
             "module.storage_smart.ata.col.raw".to_string(),
+            "module.storage_smart.ata.col.state".to_string(),
         ],
         Vec::new(),
     );
@@ -472,14 +621,51 @@ fn attribute_table(attributes: &[AtaAttribute]) -> Table {
                     attribute.threshold.to_string()
                 },
                 attribute.raw.to_string(),
+                String::new(),
             ]
         })
         .collect();
 
     for (row, attribute) in attributes.iter().enumerate() {
-        table = table.with_value_key(row, 1, attribute_name_key(attribute.id));
+        let state = attribute_state(attribute);
+        table = table
+            .with_value_key(row, 1, attribute_name_key(attribute.id))
+            .with_value_key(row, 6, attribute_state_key(state))
+            .with_cell_level(row, 6, attribute_level(state));
     }
     table
+}
+
+/// Ocena pojedynczego atrybutu jako poziom widoku; „OK” też jest oceną, bo
+/// pusta komórka wygląda jak brak danych.
+fn attribute_level(state: Health) -> StatusLevel {
+    match state {
+        Health::Good => StatusLevel::Ok,
+        Health::Warning => StatusLevel::Warn,
+        Health::Bad => StatusLevel::Bad,
+    }
+}
+
+fn attribute_state_key(state: Health) -> &'static str {
+    match state {
+        Health::Good => "module.storage_smart.ata.state.ok",
+        Health::Warning => "module.storage_smart.ata.state.warn",
+        Health::Bad => "module.storage_smart.ata.state.bad",
+    }
+}
+
+/// Zużycie nośnika ATA: atrybut 177 (wear leveling), 231 (pozostałe życie SSD)
+/// i 233 (media wearout) podają pozostałe życie w procentach, gdzie 100 = nowy
+/// nośnik. Zero w wartości to brak pomiaru, nie „zużycie 100 %”.
+fn ata_wear_percent(attributes: &[AtaAttribute]) -> Option<u8> {
+    for id in [177u8, 231, 233] {
+        if let Some(attribute) = attributes.iter().find(|attribute| attribute.id == id)
+            && (1..=100).contains(&attribute.value)
+        {
+            return Some(100 - attribute.value);
+        }
+    }
+    None
 }
 
 /// Klucz nazwy atrybutu: przetłumaczony, gdy znamy atrybut, inaczej wspólna
@@ -554,6 +740,17 @@ fn health_key(health: Option<Health>) -> &'static str {
     }
 }
 
+/// Poziom do kolorowania: brak danych to `None`, a nie „dobry” — inaczej
+/// dysk bez SMART wyglądałby na sprawdzony.
+fn health_level(health: Option<Health>) -> Option<StatusLevel> {
+    match health {
+        Some(Health::Good) => Some(StatusLevel::Ok),
+        Some(Health::Warning) => Some(StatusLevel::Warn),
+        Some(Health::Bad) => Some(StatusLevel::Bad),
+        None => None,
+    }
+}
+
 fn health_name(health: Option<Health>) -> Option<&'static str> {
     match health {
         Some(Health::Good) => Some("good"),
@@ -608,6 +805,10 @@ fn drive_json(report: &DriveReport) -> serde_json::Value {
         "health": health_name(report.health),
         "temperature_c": report.temperature_c(),
         "power_on_hours": report.power_on_hours(),
+        "power_cycles": report.power_cycles(),
+        "wear_percent": report.wear_percent(),
+        "data_read_bytes": report.read_bytes(),
+        "data_written_bytes": report.written_bytes(),
         "nvme": report.nvme.as_ref().map(nvme_json),
         "ata": report.ata.as_ref().map(|attributes| {
             attributes.iter().map(attribute_json).collect::<Vec<_>>()
@@ -627,6 +828,8 @@ fn nvme_json(health: &NvmeHealth) -> serde_json::Value {
         "percentage_used": health.percentage_used,
         "data_read_bytes": health.data_read_bytes.min(u128::from(u64::MAX)) as u64,
         "data_written_bytes": health.data_written_bytes.min(u128::from(u64::MAX)) as u64,
+        "host_read_commands": health.host_read_commands,
+        "host_write_commands": health.host_write_commands,
         "power_on_hours": health.power_on_hours,
         "power_cycles": health.power_cycles,
         "controller_busy_minutes": health.controller_busy_minutes,
@@ -780,21 +983,130 @@ mod tests {
         let output = StorageSmart.collect(&harness().ctx()).expect("zbieranie");
         let table = table_at(&output.view, 0);
         assert_eq!(table.rows[0][0], "WDC PC SN530 SDBPNPZ-512G");
-        assert_eq!(table.rows[0][1], "NVMe");
-        assert_eq!(table.rows[0][4], "41 °C");
-        assert_eq!(table.value_key(0, 2), Some("common.value.ssd"));
+        assert_eq!(table.rows[0][2], "41 °C");
+        assert_eq!(table.rows[0][3], "NVMe");
+        assert_eq!(table.rows[0][5], "3 %");
+        assert_eq!(table.rows[0][6], "1234 h");
+        assert_eq!(table.value_key(0, 4), Some("common.value.ssd"));
         assert_eq!(
-            table.value_key(0, 3),
+            table.value_key(0, 1),
             Some("module.storage_smart.health.good")
         );
+        assert_eq!(table.cell_level(0, 1), Some(StatusLevel::Ok));
+        assert_eq!(table.cell_level(0, 5), Some(StatusLevel::Ok));
         assert_eq!(
-            table.value_key(1, 3),
+            table.value_key(1, 1),
             Some("module.storage_smart.health.good")
         );
         // Wartości w komórkach nie mogą być prozą.
         for row in &table.rows {
-            assert_ne!(row[2], "SSD");
+            assert_ne!(row[4], "SSD");
         }
+    }
+
+    #[test]
+    fn drive_section_starts_with_health_banner() {
+        let output = StorageSmart.collect(&harness().ctx()).expect("zbieranie");
+        let section = &output.view.sections[2];
+        match &section.blocks[0] {
+            Block::Status {
+                label_key,
+                value_key,
+                level,
+            } => {
+                assert_eq!(label_key, "module.storage_smart.drive.health");
+                assert_eq!(value_key, "module.storage_smart.health.good");
+                assert_eq!(*level, StatusLevel::Ok);
+            }
+            other => panic!("pierwszy blok sekcji to nie stan: {other:?}"),
+        }
+
+        // Stan jest w banerze, więc nie powtarza się w wierszach tożsamości.
+        let identity = section
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::KeyValues { rows } => Some(rows),
+                _ => None,
+            })
+            .expect("wiersze tożsamości");
+        assert!(
+            identity
+                .iter()
+                .all(|row| row.label_key != "module.storage_smart.drive.health")
+        );
+    }
+
+    #[test]
+    fn ata_indicators_are_computed_from_attributes() {
+        let output = StorageSmart.collect(&harness().ctx()).expect("zbieranie");
+        let section = &output.view.sections[2];
+        let indicators = section
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::KeyValues { rows }
+                    if rows
+                        .iter()
+                        .any(|row| row.label_key == "module.storage_smart.ata.crc") =>
+                {
+                    Some(rows)
+                }
+                _ => None,
+            })
+            .expect("wskaźniki ATA");
+
+        let value = |key: &str| {
+            indicators
+                .iter()
+                .find(|row| row.label_key == key)
+                .map(|row| row.value.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(value("module.storage_smart.ind.temperature"), "38 °C");
+        assert_eq!(value("module.storage_smart.ind.power_on_hours"), "12345 h");
+        assert_eq!(value("module.storage_smart.ata.reallocated"), "0");
+        assert_eq!(value("module.storage_smart.ata.pending"), "-");
+        // 1 000 000 LBA × 512 B sektora logicznego.
+        assert_eq!(
+            value("module.storage_smart.ind.data_written"),
+            format_bytes(1_000_000 * 512)
+        );
+    }
+
+    #[test]
+    fn ata_wear_comes_from_remaining_life_attribute() {
+        let attributes = [
+            AtaAttribute {
+                id: 231,
+                flags: 0,
+                value: 88,
+                worst: 88,
+                threshold: 10,
+                raw: 0,
+            },
+            AtaAttribute {
+                id: 233,
+                flags: 0,
+                value: 100,
+                worst: 100,
+                threshold: 0,
+                raw: 0,
+            },
+        ];
+        assert_eq!(ata_wear_percent(&attributes), Some(12));
+
+        // Zero w wartości znormalizowanej to brak pomiaru, nie zużycie 100 %.
+        let unmeasured = [AtaAttribute {
+            id: 177,
+            flags: 0,
+            value: 0,
+            worst: 0,
+            threshold: 0,
+            raw: 0,
+        }];
+        assert_eq!(ata_wear_percent(&unmeasured), None);
+        assert_eq!(ata_wear_percent(&[]), None);
     }
 
     #[test]
@@ -821,6 +1133,13 @@ mod tests {
         assert_eq!(table.rows[0][4], "50");
         assert_eq!(table.value_key(0, 1), Some("module.storage_smart.attr.5"));
         assert_eq!(table.value_key(2, 1), Some("module.storage_smart.attr.194"));
+        // Kolumna oceny: każdy atrybut ma werdykt i kolor, także „OK”.
+        assert_eq!(
+            table.value_key(0, 6),
+            Some("module.storage_smart.ata.state.ok")
+        );
+        assert_eq!(table.cell_level(0, 6), Some(StatusLevel::Ok));
+        assert_eq!(table.cell_level(1, 6), Some(StatusLevel::Ok));
     }
 
     #[test]
@@ -1080,7 +1399,7 @@ mod tests {
 
         let table = table_at(&output.view, 0);
         assert_eq!(
-            table.rows[0][6], "-",
+            table.rows[0][7], "-",
             "zero w liczniku NVMe to brak pomiaru, nie 0,0 GB"
         );
         let written = output
@@ -1091,11 +1410,66 @@ mod tests {
             .find_map(|block| match block {
                 Block::KeyValues { rows } => rows
                     .iter()
-                    .find(|row| row.label_key == "module.storage_smart.nvme.data_written"),
+                    .find(|row| row.label_key == "module.storage_smart.ind.data_written"),
                 _ => None,
             })
             .expect("wiersz zapisanych danych");
         assert_eq!(written.value, "-");
+    }
+
+    #[test]
+    fn worn_nvme_is_marked_in_overview() {
+        let mut page = nvme_page();
+        page[5] = 92; // zużycie nośnika
+        let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![disk_row(0, "NVMe")]);
+        let storage = MockStorage::new()
+            .with_nvme(PhysicalDrive::new(0, BusKind::Nvme, DriveKind::Ssd), page);
+        let output = StorageSmart
+            .collect(
+                &Harness::new()
+                    .with_wmi(wmi)
+                    .with_storage(storage)
+                    .with_host(sk_core::testing::MockHost::elevated())
+                    .ctx(),
+            )
+            .expect("zbieranie");
+
+        let table = table_at(&output.view, 0);
+        assert_eq!(table.rows[0][5], "92 %");
+        assert_eq!(table.cell_level(0, 5), Some(StatusLevel::Warn));
+        assert_eq!(table.cell_level(0, 1), Some(StatusLevel::Warn));
+        assert_eq!(output.data["drives"][0]["wear_percent"], 92);
+    }
+
+    #[test]
+    fn attribute_rows_get_verdict_from_threshold_and_counters() {
+        let (mut attributes, thresholds) = ata_sectors();
+        // Atrybut 197 z progiem 10 i wartością 8 (przekroczony), atrybut 5 czysty.
+        let entry = 2 + 4 * 12;
+        attributes[entry] = 197;
+        attributes[entry + 3] = 8;
+        attributes[entry + 4] = 8;
+        attributes[entry + 5..entry + 11].copy_from_slice(&4u64.to_le_bytes()[..6]);
+        let mut thresholds = thresholds;
+        thresholds[entry] = 197;
+        thresholds[entry + 1] = 10;
+
+        let parsed = smart::parse_ata_attributes(&attributes, &thresholds).expect("atrybuty ATA");
+        let table = attribute_table(&parsed);
+        let row = table
+            .rows
+            .iter()
+            .position(|cells| cells[0] == "197")
+            .expect("atrybut 197");
+        assert_eq!(
+            table.value_key(row, 6),
+            Some("module.storage_smart.ata.state.bad")
+        );
+        assert_eq!(table.cell_level(row, 6), Some(StatusLevel::Bad));
+        assert_eq!(
+            table.value_key(0, 6),
+            Some("module.storage_smart.ata.state.ok")
+        );
     }
 
     #[test]

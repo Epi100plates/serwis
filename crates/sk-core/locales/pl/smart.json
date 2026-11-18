@@ -13,6 +13,7 @@
   "module.storage_smart.attr.13": "Wskaźnik miękkich błędów odczytu",
   "module.storage_smart.attr.22": "Poziom helu",
   "module.storage_smart.attr.160": "Liczba błędów niekorygowalnych",
+  "module.storage_smart.attr.177": "Licznik wyrównywania zużycia",
   "module.storage_smart.attr.183": "Bloki wadliwe wykryte podczas pracy",
   "module.storage_smart.attr.184": "Błędy kontroli end-to-end",
   "module.storage_smart.attr.187": "Zgłoszone błędy niekorygowalne",
