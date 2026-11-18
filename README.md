@@ -10,6 +10,10 @@ Stan dysków (SMART) w układzie jak CrystalDiskInfo: stan i temperatura każdeg
 
 ![Stan dysków (SMART) — przegląd, baner stanu i wskaźniki](docs/screenshot-smart.png)
 
+Tabela atrybutów ATA z kolumną „Ocena” — zrzut z makiety (`MockStorage`), bo kontroler SATA tej maszyny nie przekazuje SMART:
+
+![Tabela atrybutów ATA z oceną — dane syntetyczne](docs/screenshot-smart-ata-synthetic.png)
+
 Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
 
 ## Dlaczego
