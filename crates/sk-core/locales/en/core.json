@@ -1,0 +1,22 @@
+{
+  "common.capability.userland": "User",
+  "common.capability.elevated": "Administrator",
+  "common.capability.destructive": "Administrator + confirmation",
+  "common.group.hardware": "Hardware",
+  "common.group.storage": "Storage",
+  "common.group.migration": "Migration",
+  "common.group.system": "System",
+  "common.group.tools": "Tools",
+  "common.state.elevated": "Administrator",
+  "common.state.userland": "Standard user",
+  "ui.app.title": "SerwisKit",
+  "ui.modules": "Modules",
+  "ui.refresh": "Refresh",
+  "ui.select_module": "Select a module from the list on the left.",
+  "ui.no_modules": "No modules registered.",
+  "ui.error": "Module error",
+  "ui.locale": "Language",
+  "ui.experimental": "Experimental",
+  "ui.section": "Section",
+  "ui.empty_section": "No data in this section."
+}

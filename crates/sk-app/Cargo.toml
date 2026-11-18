@@ -1,0 +1,30 @@
+[package]
+name = "sk-app"
+description = "SerwisKit — aplikacja (GUI egui + tryb CLI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "serwiskit"
+path = "src/main.rs"
+
+[dependencies]
+sk-core = { path = "../sk-core" }
+sk-win = { path = "../sk-win" }
+sk-modules = { path = "../sk-modules" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+clap.workspace = true
+tracing.workspace = true
+eframe.workspace = true
+egui.workspace = true
+
+[dev-dependencies]
+sk-core = { path = "../sk-core", features = ["testing"] }
+egui_kittest = "=0.37.0"
+
+[lints]
+workspace = true

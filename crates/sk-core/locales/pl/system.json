@@ -1,0 +1,16 @@
+{
+  "module.system_info.name": "System i komputer",
+  "module.system_info.desc": "Wersja systemu, model komputera, ilość pamięci, czas działania i uprawnienia procesu.",
+  "module.system_info.section.os": "System operacyjny",
+  "module.system_info.section.host": "Komputer",
+  "module.system_info.os.caption": "Nazwa",
+  "module.system_info.os.version": "Wersja",
+  "module.system_info.os.build": "Numer kompilacji",
+  "module.system_info.os.arch": "Architektura",
+  "module.system_info.host.manufacturer": "Producent",
+  "module.system_info.host.model": "Model",
+  "module.system_info.host.ram_total": "Pamięć RAM",
+  "module.system_info.host.uptime": "Czas działania",
+  "module.system_info.host.local_time": "Czas lokalny",
+  "module.system_info.privileges": "Uprawnienia procesu"
+}

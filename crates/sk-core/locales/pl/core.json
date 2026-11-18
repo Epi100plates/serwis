@@ -1,0 +1,22 @@
+{
+  "common.capability.userland": "Użytkownik",
+  "common.capability.elevated": "Administrator",
+  "common.capability.destructive": "Administrator + potwierdzenie",
+  "common.group.hardware": "Sprzęt",
+  "common.group.storage": "Dyski",
+  "common.group.migration": "Migracja",
+  "common.group.system": "System",
+  "common.group.tools": "Narzędzia",
+  "common.state.elevated": "Administrator",
+  "common.state.userland": "Użytkownik",
+  "ui.app.title": "SerwisKit",
+  "ui.modules": "Moduły",
+  "ui.refresh": "Odśwież",
+  "ui.select_module": "Wybierz moduł z listy po lewej.",
+  "ui.no_modules": "Brak zarejestrowanych modułów.",
+  "ui.error": "Błąd modułu",
+  "ui.locale": "Język",
+  "ui.experimental": "Eksperymentalny",
+  "ui.section": "Sekcja",
+  "ui.empty_section": "Brak danych w tej sekcji."
+}

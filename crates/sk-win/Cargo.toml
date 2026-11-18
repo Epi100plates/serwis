@@ -1,0 +1,32 @@
+[package]
+name = "sk-win"
+description = "Warstwa Windows SerwisKit: WMI, zegar, środowisko procesu (jedyne miejsce z unsafe)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sk-core = { path = "../sk-core" }
+serde_json.workspace = true
+tracing.workspace = true
+wmi.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_Security",
+] }
+
+# Wyjątek od reguły repozytorium: całe FFI żyje w tym crate, więc `unsafe_code`
+# jest tu dozwolone. Pozostałe linty jak w workspace (Cargo nie pozwala łączyć
+# `workspace = true` z nadpisaniem, stąd jawna lista).
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

@@ -1,0 +1,19 @@
+[package]
+name = "sk-modules"
+description = "Moduły SerwisKit: jeden plik = jeden moduł"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sk-core = { path = "../sk-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+sk-core = { path = "../sk-core", features = ["testing"] }
+
+[lints]
+workspace = true

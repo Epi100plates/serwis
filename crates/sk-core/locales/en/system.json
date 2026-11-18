@@ -1,0 +1,16 @@
+{
+  "module.system_info.name": "System and computer",
+  "module.system_info.desc": "OS version, computer model, installed memory, uptime and process privileges.",
+  "module.system_info.section.os": "Operating system",
+  "module.system_info.section.host": "Computer",
+  "module.system_info.os.caption": "Name",
+  "module.system_info.os.version": "Version",
+  "module.system_info.os.build": "Build number",
+  "module.system_info.os.arch": "Architecture",
+  "module.system_info.host.manufacturer": "Manufacturer",
+  "module.system_info.host.model": "Model",
+  "module.system_info.host.ram_total": "Installed RAM",
+  "module.system_info.host.uptime": "Uptime",
+  "module.system_info.host.local_time": "Local time",
+  "module.system_info.privileges": "Process privileges"
+}

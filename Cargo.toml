@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-only"
+authors = ["SerwisKit contributors"]
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+include_dir = "=0.7.4"
+tracing = "=0.1.44"
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+windows = "=0.62.2"
+wmi = "=0.18.4"
+clap = { version = "=4.6.8", features = ["derive"] }
+eframe = "=0.37.0"
+egui = "=0.37.0"
+egui_plot = "=0.38.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
+panic = "abort"
