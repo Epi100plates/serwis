@@ -1,6 +1,6 @@
 # Jak dodać nowy moduł do SerwisKit
 
-Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 1, 2026‑11‑18). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
+Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 2 w toku, 2026‑11‑18 — SMART dysków gotowy). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
 
 Zasada nadrzędna: **moduł to jeden plik i nie dotyka kodu UI.** Jeśli musisz zmienić renderer, żeby dodać moduł, to znaczy, że moduł jest źle zaprojektowany albo brakuje typu bloku w kontrakcie (procedura w §9).
 
@@ -13,14 +13,17 @@ crates/
   sk-core/                 kontrakt: Module, View, Capability, błędy, i18n, rejestr, telemetria, makiety
     locales/pl/*.json      tłumaczenia (jeden plik na rodzinę modułów)
     locales/en/*.json
-  sk-win/                  WMI + cache, zegar, środowisko procesu, rejestr, EDID — JEDYNE miejsce z `unsafe`
+  sk-win/                  WMI + cache, zegar, środowisko procesu, rejestr, EDID, dyski/SMART — JEDYNE miejsce z `unsafe`
   sk-modules/              MODUŁY: jeden plik = jeden moduł
     src/edid.rs           parser EDID (czysty Rust, testy na fixtures)
+    src/smart.rs          parsery SMART NVMe i ATA oraz ocena stanu (czysty Rust)
     src/util.rs           wspólne dekodowanie WMI i formatowanie wartości
     src/modules/mod.rs     lista modułów i rejestracja (dwie linie na moduł)
     src/modules/hw_*.rs    moduły sprzętowe
+    src/modules/storage_*.rs moduły dyskowe (SMART, w kolejce benchmark i surface)
     tests/contract.rs      automatyczne testy każdego modułu
-    tests/hardware.rs      testy sprzętowe `#[ignore]` (prawdziwe WMI)
+    tests/golden.rs        wzorce kształtu widoków (`tests/golden/*.json`)
+    tests/hardware.rs      testy sprzętowe `#[ignore]` (prawdziwe WMI, dyski)
   sk-app/                  binarka `serwiskit`: egui + clap + renderer widoków + raport JSON/HTML
     src/html.rs            raport HTML z modelu `View` (inline SVG dla wykresów)
     src/live.rs            próbkowanie telemetrii dla `system.live`
@@ -94,6 +97,7 @@ pub struct CollectCtx<'a> {
     pub clock: &'a dyn Clock,          // now(), uptime_secs()
     pub host: &'a dyn HostEnv,         // is_elevated()
     pub machine: &'a dyn MachineInfo,  // firmware(), adapter_memory(), display_edid()
+    pub storage: &'a dyn StorageProbe, // describe(index), smart(index) — dyski fizyczne (Faza 2)
     pub live: &'a dyn LiveSource,      // samples() — historia telemetrii (Faza 1)
     pub locale: Locale,
 }
@@ -101,7 +105,9 @@ pub struct CollectCtx<'a> {
 
 `MachineInfo` istnieje dlatego, że WMI **nie** daje trzech rzeczy: trybu firmware (`GetFirmwareType`), realnego VRAM (`AdapterRAM` jest 32‑bitowe i obcina do 4 GiB) i EDID monitora (tylko rejestr). Wszystkie metody mają domyślne implementacje, więc makieta nie musi ich znać — brak danych jest poprawnym stanem.
 
-Kolejne fazy rozszerzą kontekst (Faza 2: `devices: &dyn RawDevice` do surowych sektorów, Faza 3: `dpapi: &dyn Dpapi`). Rozszerzenie wykonuje lider, nie autor modułu.
+`StorageProbe` (Faza 2) daje to, czego WMI nie daje o dyskach: magistralę i rodzaj nośnika z deskryptora urządzenia oraz **surowe** bloki SMART. Implementacja realna (`sk-win/src/storage.rs`) wymaga administratora; makieta (`MockStorage`) podstawia gotowe bajty.
+
+Kolejne fazy rozszerzą kontekst (Faza 3: `dpapi: &dyn Dpapi` do haseł przeglądarek). Rozszerzenie wykonuje lider, nie autor modułu.
 
 Widok (to renderuje `sk-app`; ten sam model trafia do raportu HTML, moduł nigdy nie importuje `egui`):
 
@@ -343,6 +349,24 @@ fn collect(&self, ctx: &CollectCtx<'_>) -> Result<ModuleOutput> {
 
 Próbki zbiera wątek roboczy aplikacji (`sk-app/src/live.rs`) i tylko wtedy, gdy moduł jest otwarty w GUI. Dzięki temu `collect()` jest natychmiastowe, a moduł pozostaje bezstanowy i testowalny przez `MockLive`.
 
+### 5.2 Surowe dane urządzeń — SMART
+
+Zasada: **transport w `sk-win`, parsowanie w module**. `StorageProbe` zwraca bajty dokładnie w takiej postaci, w jakiej daje je system:
+
+```rust
+ctx.storage.describe(4)?          // PhysicalDrive { index, bus, kind, removable } — z deskryptora
+ctx.storage.smart(4)?             // SmartData::Nvme { log_page } | SmartData::Ata { attributes, thresholds }
+```
+
+Parsery współdzielone leżą w `crates/sk-modules/src/smart.rs` (`parse_nvme_health`, `parse_ata_attributes`, `nvme_health`, `ata_health`) — nie kopiuj ich do modułu. Są czystymi funkcjami, więc każdy przypadek (zużycie 100 %, sektory oczekujące, przekroczony próg) testuje się na zbudowanym w teście buforze, bez dysku i bez administratora.
+
+Reguły, których oczekuje review:
+
+- **Brak uprawnień to nie błąd modułu.** `AccessDenied` → `Block::note(NoteLevel::Warn, "…note.elevation")` plus stan „nieznane” w tabeli; `collect()` zwraca `Ok`.
+- **Awaria jednego dysku nie zabiera raportu.** Błąd `smart()` zapisujesz przy konkretnym dysku (dane JSON `error.kind`), a nie jako `Err` całego modułu.
+- **Nie interpretuj surowych liczników bez wiedzy.** Atrybuty 5, 187, 197, 198, 199 mają znaczenie; atrybuty 1 i 7 mają surowe wartości niezerowe także na zdrowym dysku.
+- **Ocena stanu jest jawna** (`Health::Good/Warning/Bad`) i pokazana jako `value_key` (`module.storage_smart.health.*`), nie jako kolor bez wyjaśnienia.
+
 ---
 
 ## 6. Testy, których oczekuje review
@@ -357,7 +381,7 @@ Próbki zbiera wątek roboczy aplikacji (`sk-app/src/live.rs`) i tylko wtedy, gd
 
 Wzorce golden odświeżasz świadomie: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`, potem commit z opisem, dlaczego widok się zmienił.
 
-Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`.
+Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, MockStorage, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`. `MockStorage` ma `with_nvme`, `with_ata`, `with_denied` (brak administratora) i `with_unavailable` (mostek USB/kontroler RAID).
 
 ---
 

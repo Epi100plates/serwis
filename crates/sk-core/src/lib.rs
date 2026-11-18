@@ -23,8 +23,8 @@ pub mod prelude {
     pub use crate::live::{LiveHistory, LiveSample, percent_of};
     pub use crate::module::{Capability, CollectCtx, Group, Module, ModuleMeta, ModuleOutput};
     pub use crate::providers::{
-        AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, NS_CIMV2, NS_WMI,
-        WmiProvider,
+        AdapterMemory, BusKind, Clock, DriveKind, Firmware, HostEnv, LiveSource, MachineInfo,
+        NS_CIMV2, NS_WMI, PhysicalDrive, SmartData, StorageProbe, WmiProvider,
     };
     pub use crate::queries;
     pub use crate::registry::ModuleRegistry;

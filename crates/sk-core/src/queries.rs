@@ -22,3 +22,10 @@ pub const WIN32_VIDEO_CONTROLLER: &str = "SELECT Name, AdapterCompatibility, Vid
 /// Bieżące taktowanie procesora — współdzielone przez `hw.cpu` i telemetrię.
 pub const PROCESSOR_PERFORMANCE: &str =
     "SELECT Active, InstanceName, frequency, percentage FROM ProcessorPerformance";
+
+/// Dyski fizyczne: tożsamość, interfejs i geometria. Współdzielone przez
+/// `hw.disk_inventory` i `storage.smart` — identyczna lista pól to jedno
+/// zapytanie w rundzie.
+pub const WIN32_DISK_DRIVE: &str = "SELECT Index, Model, InterfaceType, MediaType, Size, \
+     BytesPerSector, FirmwareRevision, SerialNumber, Partitions, Status, PNPDeviceID \
+     FROM Win32_DiskDrive";

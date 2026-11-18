@@ -15,7 +15,7 @@ use sk_core::i18n::{Locale, Translator};
 use sk_core::live::LiveHistory;
 use sk_core::module::{Capability, CollectCtx, ModuleMeta, ModuleOutput};
 use sk_core::registry::ModuleRegistry;
-use sk_win::{SystemClock, WinHostEnv, WinMachine, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
 
 use crate::live::sample;
 use crate::render;
@@ -368,6 +368,7 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
     let clock = SystemClock::new();
     let host = WinHostEnv::new();
     let machine = WinMachine::new();
+    let storage = WinStorage::new();
     let mut history = LiveHistory::new(LIVE_HISTORY_CAPACITY);
     let started = Instant::now();
     let locale = Locale::Pl;
@@ -381,6 +382,7 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
                     clock: &clock,
                     host: &host,
                     machine: &machine,
+                    storage: &storage,
                     live: &history,
                     locale,
                 };
@@ -398,6 +400,7 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
                     clock: &clock,
                     host: &host,
                     machine: &machine,
+                    storage: &storage,
                     live: &history,
                     locale,
                 };
@@ -416,6 +419,7 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
                     clock: &clock,
                     host: &host,
                     machine: &machine,
+                    storage: &storage,
                     live: &history,
                     locale,
                 };

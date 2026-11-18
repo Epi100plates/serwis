@@ -304,15 +304,37 @@ Zrealizowane:
 
 **Akceptacja — potwierdzona:** wszystkie moduły zwracają realne dane na tej maszynie (`report` → 10 modułów, 0 błędów), bateria przechodzi na fixture syntetycznym, raport HTML otwiera się w przeglądarce i zawiera komplet sekcji (zrzuty: `docs/screenshot.png`, `docs/report.png`), testy modułów na mockach zielone, testy `--ignored` przechodzą.
 
-### Faza 2 — Dyski: SMART i benchmarki (4–7 dni)
+### Faza 2 — Dyski: SMART i benchmarki (4–7 dni) — 🚧 w toku (SMART gotowy 2026‑11‑18)
 
-- `storage.smart`: NVMe health log + ATA SMART, parsery atrybutów, ocena stanu, czytelne etykiety PL/EN.
-- `storage.bench`: sekwencyjny odczyt całej powierzchni (mapa prędkości, koszyki 1 GiB), losowy 4K, czas dostępu; live wykres; eksport CSV/JSON.
-- `storage.surface`: odczyt bloków z retry, timeout per I/O, lista błędnych LBA, wznowienie od offsetu.
-- `storage.write_test`: zapis, `Capability::Destructive`, domyślnie wyłączony.
-- Obsługa braku uprawnień: jasny komunikat + przycisk restartu jako admin.
+**Zrealizowane — `storage.smart`:**
 
-**Akceptacja:** SMART NVMe i SATA czytelne na maszynie testowej (z adminem); benchmark odczytu daje sensowną mapę (>500 MB/s SSD SATA, >1 GB/s NVMe); surface test na 240 GB SSD kończy się raportem bez błędów; test zapisu odmawia na dysku systemowym; wszystko testowalne na mocku bez admina w CI.
+- `sk-win/src/storage.rs`: `WinStorage` (trait `StorageProbe`). Deskryptor urządzenia (`IOCTL_STORAGE_QUERY_PROPERTY`: magistrala, nośnik wymienny, `IncursSeekPenalty` → SSD/HDD), strona logu zdrowia NVMe (log page 0x02 przez `StorageDeviceProtocolSpecificProperty` z fallbackiem na poziom adaptera) i SMART ATA **dwiema ścieżkami**: `IOCTL_ATA_PASS_THROUGH` oraz klasyczny `SMART_RCV_DRIVE_DATA`. Wszystkie uchwyty zamykane w `Drop`, `unsafe` wyłącznie tutaj.
+- `sk-modules/src/smart.rs`: parsery NVMe (offsety logu, kelwiny→°C, jednostki 1000×512 B) i ATA (30 atrybutów × 12 B, progi z osobnego sektora), ocena stanu (`Good`/`Warning`/`Bad`) z jawnymi regułami: przekroczony próg producenta = `Bad`, niezerowe liczniki 5/187/196/197/198/199 = `Warning`, NVMe: bity critical warning + % zużycia + błędy medium + zapas bloków.
+- `storage.smart`: przegląd wszystkich dysków (model, magistrala, typ, stan, temperatura, godziny pracy, zapisane dane) + sekcja na dysk (tożsamość, szczegóły NVMe, tabela atrybutów ATA z **58 przetłumaczonymi nazwami**, nieznane atrybuty producenta jako „Atrybut producenta”). `Capability::Elevated`.
+- Degradacja bez wyjątku: brak admina → stan „Nieznane” + notka o uprawnieniach; mostek USB/kontroler RAID → notka informacyjna; czytnik bez nośnika → pomijany bez IOCTL; awaria jednego dysku nie psuje raportu.
+- Testy: 33 nowe (parsery na budowanych buforach, moduł na `MockStorage`, 2 nowe testy makiet w `sk-core`, 5 testów warstwy Windows, golden `storage_smart_view.json`, test sprzętowy `#[ignore]`). Razem 167 testów zielonych, 6 `#[ignore]`.
+
+**Dowód z tej maszyny (release z manifestem, `serwiskit report --json/--html`):** 11 modułów, 0 błędów, cache WMI 2 trafienia/16 zapytań (współdzielone `Win32_DiskDrive`).
+
+| Dysk | Wynik |
+|---|---|
+| WD PC SN530 512 GB (NVMe) | stan **Dobry**, 54 °C, zużycie 3 %, 4946 h, 23,84 TB zapisane / 23,21 TB odczytane, 2183 cykle zasilania, 176 niebezpiecznych wyłączeń, 0 błędów medium, zapas bloków 100 % (próg 10 %) |
+| CT1000MX500SSD1 (SATA) | kontroler odrzuca SMART obiema ścieżkami (`ABRT` / `ERROR_IO_DEVICE`); moduł pokazuje powód zamiast udawać dane |
+| Microsoft Storage Space Device | magistrala RAID, brak SMART — notka „kontroler nie przekazuje” |
+| Czytnik USB bez nośnika | pominięty bez wywołania IOCTL |
+
+**Odstępstwa i decyzje (świadome):**
+
+| Plan | Rzeczywistość | Powód |
+|---|---|---|
+| SMART ATA jednym IOCTL-em | dwie ścieżki: `IOCTL_ATA_PASS_THROUGH` + `SMART_RCV_DRIVE_DATA` | miniporty różnią się obsługą; druga ścieżka to ta, której używa CrystalDiskInfo. Obie odpowiedzi trafiają do raportu, gdy zawiodą |
+| tylko odczyt SMART | po nieudanym odczycie jedna próba `SMART ENABLE` | część dysków ma SMART wyłączony w firmware (np. po secure erase); polecenie jest odwracalne i nie dotyka danych |
+| fixtures SMART z prawdziwego dysku | syntetyczne bufory budowane w testach | odczyt wymaga administratora, więc fixture w CI byłby nieodtwarzalny; kształt danych pilnuje golden + testy parserów |
+| ocena stanu „jak CrystalDiskInfo” | własne, jawne reguły w `smart.rs` | brak licencji na kopiowanie progów; reguły są opisane w kodzie i testach |
+
+**Pozostałe w Fazie 2:** `storage.bench` (mapa prędkości, 4K, czas dostępu), `storage.surface`, `storage.write_test` (`Destructive`) i `TaskDescriptor` (postęp/anulowanie).
+
+**Akceptacja (częściowa):** SMART NVMe potwierdzony na maszynie testowej (dane powyżej, admin z manifestu). SMART SATA **niepotwierdzony sprzętowo** — jedyny dysk SATA w tej maszynie jest za kontrolerem, który odrzuca oba polecenia; ścieżka ATA ma testy jednostkowe na buforach zgodnych ze standardem i czeka na weryfikację na sprzęcie, który przekazuje SMART. Benchmarki i surface test — poza tym przyrostem.
 
 ### Faza 3 — Migracja przeglądarek (5–8 dni)
 

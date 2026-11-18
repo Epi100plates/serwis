@@ -12,6 +12,8 @@
   "common.value.yes": "Yes",
   "common.value.no": "No",
   "common.value.unknown": "Unknown",
+  "common.value.ssd": "SSD",
+  "common.value.hdd": "HDD",
   "common.value.digital": "Digital",
   "common.value.analog": "Analog",
   "common.value.none": "None",

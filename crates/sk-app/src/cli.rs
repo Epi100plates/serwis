@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sk_core::i18n::{Locale, Translator};
 use sk_core::module::CollectCtx;
-use sk_win::{SystemClock, WinHostEnv, WinMachine, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
 
 use crate::report::{self, Report, ReportOptions};
 
@@ -98,6 +98,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
     let clock = SystemClock::new();
     let host = WinHostEnv::new();
     let machine = WinMachine::new();
+    let storage = WinStorage::new();
     let live = sk_core::live::LiveHistory::new(1);
     wmi.begin_round();
 
@@ -106,6 +107,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         clock: &clock,
         host: &host,
         machine: &machine,
+        storage: &storage,
         live: &live,
         locale,
     };

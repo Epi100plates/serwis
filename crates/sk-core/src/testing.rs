@@ -10,7 +10,8 @@ use crate::i18n::Locale;
 use crate::live::LiveSample;
 use crate::module::CollectCtx;
 use crate::providers::{
-    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, WmiProvider,
+    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SmartData,
+    StorageProbe, WmiProvider,
 };
 
 /// WMI zwracające przygotowane wiersze. Fragment zapytania dopasowuje się do
@@ -181,6 +182,92 @@ impl LiveSource for MockLive {
     }
 }
 
+/// Jeden dysk w makiecie: dane SMART albo błąd, który naprawdę może się zdarzyć.
+#[derive(Debug, Clone)]
+enum MockSmart {
+    Data(SmartData),
+    Denied,
+    Unavailable(String),
+}
+
+/// Dyski fizyczne i SMART dla testów — moduł dostaje dokładnie to, co poda test.
+///
+/// Domyślnie brak dysków, więc makieta bez konfiguracji zachowuje się jak proces
+/// bez uprawnień administratora: moduł ma pokazać notkę, nie panikę.
+#[derive(Debug, Clone, Default)]
+pub struct MockStorage {
+    drives: std::collections::HashMap<u32, PhysicalDrive>,
+    smart: std::collections::HashMap<u32, MockSmart>,
+}
+
+impl MockStorage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn insert(mut self, drive: PhysicalDrive, entry: MockSmart) -> Self {
+        self.smart.insert(drive.index, entry);
+        self.drives.insert(drive.index, drive);
+        self
+    }
+
+    /// Dysk NVMe z surową stroną logu zdrowia (512 B).
+    pub fn with_nvme(self, drive: PhysicalDrive, log_page: Vec<u8>) -> Self {
+        self.insert(drive, MockSmart::Data(SmartData::Nvme { log_page }))
+    }
+
+    /// Dysk ATA/SATA z surowymi atrybutami i progami (po 512 B).
+    pub fn with_ata(self, drive: PhysicalDrive, attributes: Vec<u8>, thresholds: Vec<u8>) -> Self {
+        self.insert(
+            drive,
+            MockSmart::Data(SmartData::Ata {
+                attributes,
+                thresholds,
+            }),
+        )
+    }
+
+    /// Dysk, do którego nie ma dostępu (proces bez uprawnień administratora):
+    /// nie znamy nawet magistrali, tak jak w rzeczywistości.
+    pub fn with_denied(mut self, drive: PhysicalDrive) -> Self {
+        self.smart.insert(drive.index, MockSmart::Denied);
+        self
+    }
+
+    /// Dysk podłączony przez mostek/kontroler, który nie przekazuje SMART.
+    pub fn with_unavailable(mut self, drive: PhysicalDrive, reason: impl Into<String>) -> Self {
+        self.smart
+            .insert(drive.index, MockSmart::Unavailable(reason.into()));
+        self.drives.insert(drive.index, drive);
+        self
+    }
+}
+
+impl StorageProbe for MockStorage {
+    fn describe(&self, index: u32) -> Result<PhysicalDrive> {
+        self.drives.get(&index).cloned().ok_or_else(|| {
+            if matches!(self.smart.get(&index), Some(MockSmart::Denied)) {
+                ModuleError::access_denied(format!("\\\\.\\PhysicalDrive{index}"))
+            } else {
+                ModuleError::unavailable(format!("brak dysku {index} w makiecie"))
+            }
+        })
+    }
+
+    fn smart(&self, index: u32) -> Result<SmartData> {
+        match self.smart.get(&index) {
+            Some(MockSmart::Data(data)) => Ok(data.clone()),
+            Some(MockSmart::Denied) => Err(ModuleError::access_denied(format!(
+                "\\\\.\\PhysicalDrive{index}"
+            ))),
+            Some(MockSmart::Unavailable(reason)) => Err(ModuleError::unavailable(reason.clone())),
+            None => Err(ModuleError::unavailable(format!(
+                "brak dysku {index} w makiecie"
+            ))),
+        }
+    }
+}
+
 /// Zestaw makiet + wygodne `ctx()`.
 #[derive(Debug)]
 pub struct Harness {
@@ -189,6 +276,7 @@ pub struct Harness {
     pub host: MockHost,
     pub machine: MockMachine,
     pub live: MockLive,
+    pub storage: MockStorage,
     pub locale: Locale,
 }
 
@@ -200,6 +288,7 @@ impl Harness {
             host: MockHost::default(),
             machine: MockMachine::new(),
             live: MockLive::new(),
+            storage: MockStorage::new(),
             locale: Locale::Pl,
         }
     }
@@ -229,6 +318,11 @@ impl Harness {
         self
     }
 
+    pub fn with_storage(mut self, storage: MockStorage) -> Self {
+        self.storage = storage;
+        self
+    }
+
     pub fn with_locale(mut self, locale: Locale) -> Self {
         self.locale = locale;
         self
@@ -241,6 +335,7 @@ impl Harness {
             host: &self.host,
             machine: &self.machine,
             live: &self.live,
+            storage: &self.storage,
             locale: self.locale,
         }
     }
@@ -293,5 +388,51 @@ mod tests {
         let ctx = harness.ctx();
         assert!(ctx.host.is_elevated());
         assert_eq!(ctx.clock.uptime_secs(), 3_600);
+    }
+
+    #[test]
+    fn mock_storage_returns_configured_data_and_errors() {
+        let nvme = PhysicalDrive::new(
+            0,
+            crate::providers::BusKind::Nvme,
+            crate::providers::DriveKind::Ssd,
+        );
+        let sata = PhysicalDrive::new(
+            1,
+            crate::providers::BusKind::Sata,
+            crate::providers::DriveKind::Ssd,
+        );
+        let denied = PhysicalDrive::new(
+            2,
+            crate::providers::BusKind::Unknown,
+            crate::providers::DriveKind::Unknown,
+        );
+        let storage = MockStorage::new()
+            .with_nvme(nvme, vec![1; 512])
+            .with_ata(sata, vec![2; 512], vec![3; 512])
+            .with_denied(denied);
+
+        assert_eq!(
+            storage.describe(0).expect("opis NVMe").bus,
+            crate::providers::BusKind::Nvme
+        );
+        assert!(matches!(
+            storage.smart(0),
+            Ok(SmartData::Nvme { ref log_page }) if log_page.len() == 512
+        ));
+        assert!(matches!(storage.smart(1), Ok(SmartData::Ata { .. })));
+        // Brak dostępu: nie znamy nawet magistrali.
+        assert!(matches!(
+            storage.describe(2),
+            Err(ModuleError::AccessDenied { .. })
+        ));
+        assert!(storage.smart(9).is_err());
+    }
+
+    #[test]
+    fn empty_mock_storage_is_a_valid_state() {
+        let storage = MockStorage::new();
+        assert!(storage.describe(0).is_err());
+        assert!(storage.smart(0).is_err());
     }
 }

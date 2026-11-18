@@ -2,7 +2,7 @@
 
 Narzędzie serwisowe dla Windows 10/11 x64: diagnostyka sprzętu (jak AIDA64), testy dysków i SMART (jak HD Tune / CrystalDiskInfo) oraz migracja profili przeglądarek między komputerami. Jeden plik `.exe`, praca offline, moduły dokładane przez kontrybutorów.
 
-Projekt open source. Status: **Faza 1 ukończona** — działa GUI + CLI + jawny rejestr modułów, 10 modułów telemetrii (AIDA‑lite), wykresy live i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
+Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 11 modułów (telemetria AIDA‑lite, wykresy live, SMART dysków NVMe i ATA/SATA) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
 
 ![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
 
@@ -12,7 +12,7 @@ Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report
 
 W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercyjnych: AIDA64 do wyceny i raportu, HD Tune do testu dysku, CrystalDiskInfo do SMART, osobne narzędzia do przenoszenia profili i haseł. SerwisKit robi to w jednym oknie, offline, z raportem, który można wydrukować i dołączyć do protokołu.
 
-## Co już działa (Faza 1)
+## Co już działa (Faza 1 + SMART z Fazy 2)
 
 | Moduł | Zawartość |
 |---|---|
@@ -24,14 +24,17 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 | `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
 | `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
 | `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
+| `storage.smart` | stan dysków: temperatura, zużycie, godziny pracy, zapisane dane, **atrybuty SMART ATA z tłumaczonymi nazwami**, strona zdrowia NVMe, ocena Dobry/Ostrzeżenie/Zły |
 | `system.info` | wersja systemu, model komputera, RAM, uptime, czas lokalny, typ komputera, hypervisor, uprawnienia |
 | `system.live` | wykresy obciążenia CPU, taktowania i zużycia RAM — próbka co sekundę, historia 10 minut |
 
 Raport: JSON (maszynowy, `schema_version`) i HTML (samodzielny plik, inline SVG, bez JavaScriptu).
 
+SMART wymaga uprawnień administratora (manifest release je zapewnia). Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych.
+
 ## Zakres (wersja 1.0)
 
-- **Dyski:** SMART NVMe i ATA/SATA, sekwencyjny odczyt całej powierzchni z mapą prędkości, losowy odczyt 4K, czas dostępu, surface test (odczyt), test zapisu tylko za jawnym potwierdzeniem.
+- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt całej powierzchni z mapą prędkości, losowy odczyt 4K, czas dostępu, surface test (odczyt), test zapisu tylko za jawnym potwierdzeniem.
 - **Migracja:** wykrywanie profili Chrome/Edge/Brave/Firefox, zakładki, historia, ustawienia, hasła w granicach możliwości systemu, zaszyfrowany pakiet `.skpkg`.
 - **Raport:** JSON i HTML (gotowe w Fazie 1).
 
@@ -41,7 +44,7 @@ Czego nie ma i dlaczego: temperatury rdzeni CPU, napięcia i obroty wentylatoró
 
 Rust 1.99 (MSVC) · egui 0.37 / eframe 0.37 / egui_plot 0.38 (GUI, jeden exe, bez Node i WebView2) · `windows` 0.62 · `wmi` 0.18 · `serde` · `clap` · `chrono` · `include_dir` (wkompilowane tłumaczenia). Kolejne fazy dołożą `rusqlite` i `age`.
 
-Struktura: `sk-core` (kontrakt modułów i widoków), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware), `sk-modules` (moduły), `sk-app` (binarka `serwiskit`, raport JSON/HTML).
+Struktura: `sk-core` (kontrakt modułów i widoków), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware, dyski i SMART), `sk-modules` (moduły + parsery SMART), `sk-app` (binarka `serwiskit`, raport JSON/HTML).
 
 Wersja release ma manifest `requireAdministrator` — SMART i testy dysków wymagają administratora. Build deweloperski manifestu nie zawiera, żeby `cargo run` nie wywoływał UAC.
 

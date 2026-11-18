@@ -1,0 +1,429 @@
+{
+  "sections": [
+    {
+      "title_key": "module.storage_smart.section",
+      "subtitle": null,
+      "blocks": [
+        {
+          "kind": "table",
+          "table": {
+            "headers": [
+              "module.storage_smart.col.drive",
+              "module.storage_smart.col.bus",
+              "module.storage_smart.col.kind",
+              "module.storage_smart.col.health",
+              "module.storage_smart.col.temperature",
+              "module.storage_smart.col.hours",
+              "module.storage_smart.col.written"
+            ],
+            "rows": [
+              [
+                "WDC PC SN530 SDBPNPZ-512G-1114",
+                "NVMe",
+                "",
+                "",
+                "41 °C",
+                "1234 h",
+                "953.7 GB"
+              ],
+              [
+                "Microsoft Storage Space Device",
+                "-",
+                "",
+                "",
+                "-",
+                "-",
+                "-"
+              ],
+              [
+                "BR17  DEVICE V1.00 USB Device",
+                "-",
+                "",
+                "",
+                "-",
+                "-",
+                "-"
+              ],
+              [
+                "CT1000MX500SSD1",
+                "SATA",
+                "",
+                "",
+                "38 °C",
+                "12345 h",
+                "-"
+              ]
+            ],
+            "value_keys": [
+              [
+                null,
+                null,
+                "common.value.ssd",
+                "module.storage_smart.health.good"
+              ],
+              [
+                null,
+                null,
+                "common.value.unknown",
+                "common.value.unknown"
+              ],
+              [
+                null,
+                null,
+                "common.value.unknown",
+                "common.value.unknown"
+              ],
+              [
+                null,
+                null,
+                "common.value.ssd",
+                "module.storage_smart.health.good"
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "note",
+          "level": "warn",
+          "text_key": "module.storage_smart.note.elevation"
+        }
+      ]
+    },
+    {
+      "title_key": "module.storage_smart.section.drive",
+      "subtitle": "WDC PC SN530 SDBPNPZ-512G-1114 · \\\\.\\PhysicalDrive4",
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_smart.drive.model",
+              "value": "WDC PC SN530 SDBPNPZ-512G-1114"
+            },
+            {
+              "label_key": "module.storage_smart.drive.serial",
+              "value": "SN-REDACTED"
+            },
+            {
+              "label_key": "module.storage_smart.drive.firmware",
+              "value": "21113000"
+            },
+            {
+              "label_key": "module.storage_smart.drive.size",
+              "value": "476.9 GB"
+            },
+            {
+              "label_key": "module.storage_smart.drive.interface",
+              "value": "SCSI"
+            },
+            {
+              "label_key": "module.storage_smart.drive.bus",
+              "value": "NVMe"
+            },
+            {
+              "label_key": "module.storage_smart.drive.kind",
+              "value": "",
+              "value_key": "common.value.ssd"
+            },
+            {
+              "label_key": "module.storage_smart.drive.health",
+              "value": "",
+              "value_key": "module.storage_smart.health.good"
+            },
+            {
+              "label_key": "module.storage_smart.drive.removable",
+              "value": "",
+              "value_key": "common.value.no"
+            }
+          ]
+        },
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_smart.nvme.critical_warning",
+              "value": "0x00"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.temperature",
+              "value": "41 °C"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.sensors",
+              "value": "-"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.available_spare",
+              "value": "100 %"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.spare_threshold",
+              "value": "10 %"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.percentage_used",
+              "value": "3 %"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.data_read",
+              "value": "0.0 GB"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.data_written",
+              "value": "953.7 GB"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.power_on_hours",
+              "value": "1234 h"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.power_cycles",
+              "value": "0"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.busy_minutes",
+              "value": "0 min"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.unsafe_shutdowns",
+              "value": "0"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.media_errors",
+              "value": "0"
+            },
+            {
+              "label_key": "module.storage_smart.nvme.error_log",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title_key": "module.storage_smart.section.drive",
+      "subtitle": "Microsoft Storage Space Device · \\\\.\\PhysicalDrive5",
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_smart.drive.model",
+              "value": "Microsoft Storage Space Device"
+            },
+            {
+              "label_key": "module.storage_smart.drive.serial",
+              "value": "SN-REDACTED"
+            },
+            {
+              "label_key": "module.storage_smart.drive.firmware",
+              "value": "0.1"
+            },
+            {
+              "label_key": "module.storage_smart.drive.size",
+              "value": "669.7 GB"
+            },
+            {
+              "label_key": "module.storage_smart.drive.interface",
+              "value": "SCSI"
+            },
+            {
+              "label_key": "module.storage_smart.drive.bus",
+              "value": "-"
+            },
+            {
+              "label_key": "module.storage_smart.drive.kind",
+              "value": "",
+              "value_key": "common.value.unknown"
+            },
+            {
+              "label_key": "module.storage_smart.drive.health",
+              "value": "",
+              "value_key": "common.value.unknown"
+            },
+            {
+              "label_key": "module.storage_smart.drive.removable",
+              "value": "",
+              "value_key": "common.value.no"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "level": "info",
+          "text_key": "module.storage_smart.note.unavailable"
+        }
+      ]
+    },
+    {
+      "title_key": "module.storage_smart.section.drive",
+      "subtitle": "BR17  DEVICE V1.00 USB Device · \\\\.\\PhysicalDrive6",
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_smart.drive.model",
+              "value": "BR17  DEVICE V1.00 USB Device"
+            },
+            {
+              "label_key": "module.storage_smart.drive.serial",
+              "value": "SN-REDACTED"
+            },
+            {
+              "label_key": "module.storage_smart.drive.firmware",
+              "value": "1.00"
+            },
+            {
+              "label_key": "module.storage_smart.drive.size",
+              "value": "-"
+            },
+            {
+              "label_key": "module.storage_smart.drive.interface",
+              "value": "USB"
+            },
+            {
+              "label_key": "module.storage_smart.drive.bus",
+              "value": "-"
+            },
+            {
+              "label_key": "module.storage_smart.drive.kind",
+              "value": "",
+              "value_key": "common.value.unknown"
+            },
+            {
+              "label_key": "module.storage_smart.drive.health",
+              "value": "",
+              "value_key": "common.value.unknown"
+            },
+            {
+              "label_key": "module.storage_smart.drive.removable",
+              "value": "",
+              "value_key": "common.value.no"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "level": "info",
+          "text_key": "module.storage_smart.note.unavailable"
+        }
+      ]
+    },
+    {
+      "title_key": "module.storage_smart.section.drive",
+      "subtitle": "CT1000MX500SSD1 · \\\\.\\PhysicalDrive0",
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_smart.drive.model",
+              "value": "CT1000MX500SSD1"
+            },
+            {
+              "label_key": "module.storage_smart.drive.serial",
+              "value": "SN-REDACTED"
+            },
+            {
+              "label_key": "module.storage_smart.drive.firmware",
+              "value": "M3CR046"
+            },
+            {
+              "label_key": "module.storage_smart.drive.size",
+              "value": "931.5 GB"
+            },
+            {
+              "label_key": "module.storage_smart.drive.interface",
+              "value": "IDE"
+            },
+            {
+              "label_key": "module.storage_smart.drive.bus",
+              "value": "SATA"
+            },
+            {
+              "label_key": "module.storage_smart.drive.kind",
+              "value": "",
+              "value_key": "common.value.ssd"
+            },
+            {
+              "label_key": "module.storage_smart.drive.health",
+              "value": "",
+              "value_key": "module.storage_smart.health.good"
+            },
+            {
+              "label_key": "module.storage_smart.drive.removable",
+              "value": "",
+              "value_key": "common.value.no"
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "table": {
+            "headers": [
+              "module.storage_smart.ata.col.id",
+              "module.storage_smart.ata.col.name",
+              "module.storage_smart.ata.col.value",
+              "module.storage_smart.ata.col.worst",
+              "module.storage_smart.ata.col.threshold",
+              "module.storage_smart.ata.col.raw"
+            ],
+            "rows": [
+              [
+                "5",
+                "",
+                "100",
+                "100",
+                "50",
+                "0"
+              ],
+              [
+                "9",
+                "",
+                "99",
+                "99",
+                "-",
+                "12345"
+              ],
+              [
+                "194",
+                "",
+                "70",
+                "70",
+                "-",
+                "38"
+              ],
+              [
+                "241",
+                "",
+                "99",
+                "99",
+                "-",
+                "1000000"
+              ]
+            ],
+            "value_keys": [
+              [
+                null,
+                "module.storage_smart.attr.5"
+              ],
+              [
+                null,
+                "module.storage_smart.attr.9"
+              ],
+              [
+                null,
+                "module.storage_smart.attr.194"
+              ],
+              [
+                null,
+                "module.storage_smart.attr.241"
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

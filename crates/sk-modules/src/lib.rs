@@ -20,6 +20,7 @@ macro_rules! fixture_rows {
 
 mod edid;
 mod modules;
+mod smart;
 mod util;
 
 use sk_core::registry::ModuleRegistry;

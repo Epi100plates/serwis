@@ -7,9 +7,11 @@ mod clock;
 mod env;
 mod machine;
 mod registry;
+mod storage;
 mod wmi;
 
 pub use clock::SystemClock;
 pub use env::WinHostEnv;
 pub use machine::WinMachine;
+pub use storage::WinStorage;
 pub use wmi::{CacheStats, QueryCache, WinWmi};

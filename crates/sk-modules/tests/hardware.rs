@@ -10,13 +10,14 @@
 
 use sk_core::i18n::Locale;
 use sk_core::module::CollectCtx;
-use sk_win::{SystemClock, WinHostEnv, WinMachine, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
 
 fn ctx_parts() -> (
     WinWmi,
     SystemClock,
     WinHostEnv,
     WinMachine,
+    WinStorage,
     sk_core::live::LiveHistory,
 ) {
     (
@@ -24,6 +25,7 @@ fn ctx_parts() -> (
         SystemClock::new(),
         WinHostEnv::new(),
         WinMachine::new(),
+        WinStorage::new(),
         sk_core::live::LiveHistory::new(4),
     )
 }
@@ -32,13 +34,14 @@ fn ctx_parts() -> (
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn every_hardware_module_reads_real_data() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
         clock: &clock,
         host: &host,
         machine: &machine,
+        storage: &storage,
         live: &live,
         locale: Locale::Pl,
     };
@@ -74,13 +77,14 @@ fn every_hardware_module_reads_real_data() {
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn cpu_memory_and_disks_report_positive_numbers() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
         clock: &clock,
         host: &host,
         machine: &machine,
+        storage: &storage,
         live: &live,
         locale: Locale::Pl,
     };
@@ -123,13 +127,14 @@ fn cpu_memory_and_disks_report_positive_numbers() {
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn missing_battery_degrades_instead_of_failing() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
         clock: &clock,
         host: &host,
         machine: &machine,
+        storage: &storage,
         live: &live,
         locale: Locale::Pl,
     };
@@ -141,4 +146,41 @@ fn missing_battery_degrades_instead_of_failing() {
         .expect("brak baterii nie może być błędem modułu");
     // Na desktopie `present` = false, na laptopie dane; oba warianty są poprawne.
     assert!(battery.data["present"].is_boolean(), "{}", battery.data);
+}
+
+#[test]
+#[ignore = "wymaga prawdziwych dysków i administratora: cargo test -p sk-modules --test hardware -- --ignored"]
+fn smart_reports_drives_and_degrades_without_elevation() {
+    let registry = sk_modules::registry();
+    let (wmi, clock, host, machine, storage, live) = ctx_parts();
+    wmi.begin_round();
+    let ctx = CollectCtx {
+        wmi: &wmi,
+        clock: &clock,
+        host: &host,
+        machine: &machine,
+        storage: &storage,
+        live: &live,
+        locale: Locale::Pl,
+    };
+
+    let output = registry
+        .find("storage.smart")
+        .expect("moduł storage.smart")
+        .collect(&ctx)
+        .expect("SMART nie może wywalić całego raportu");
+
+    let drives = output.data["drives"].as_array().expect("lista dysków");
+    assert!(!drives.is_empty(), "brak dysków w systemie");
+
+    if output.data["elevated"].as_bool().unwrap_or(false) {
+        assert!(
+            output.data["drives_with_smart"].as_u64().unwrap_or(0) > 0,
+            "z administratorem żaden dysk nie oddał SMART: {}",
+            output.data
+        );
+    } else {
+        // Bez uprawnień moduł nadal ma pokazać dyski i wyjaśnić, czego brakuje.
+        assert!(output.view.uses_key("module.storage_smart.note.elevation"));
+    }
 }
