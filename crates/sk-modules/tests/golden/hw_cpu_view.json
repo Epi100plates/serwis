@@ -1,0 +1,99 @@
+{
+  "sections": [
+    {
+      "title_key": "module.hw_cpu.section.cpu",
+      "subtitle": null,
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.hw_cpu.model",
+              "value": "AMD Ryzen 5 5600 6-Core Processor"
+            },
+            {
+              "label_key": "module.hw_cpu.vendor",
+              "value": "AMD"
+            },
+            {
+              "label_key": "module.hw_cpu.caption",
+              "value": "AMD64 Family 25 Model 33 Stepping 2"
+            },
+            {
+              "label_key": "module.hw_cpu.socket",
+              "value": "AM4"
+            },
+            {
+              "label_key": "module.hw_cpu.cores",
+              "value": "6"
+            },
+            {
+              "label_key": "module.hw_cpu.threads",
+              "value": "12"
+            },
+            {
+              "label_key": "module.hw_cpu.max_clock",
+              "value": "3501 MHz"
+            },
+            {
+              "label_key": "module.hw_cpu.current_clock",
+              "value": "3501 MHz"
+            },
+            {
+              "label_key": "module.hw_cpu.frequency_percent",
+              "value": "100 %"
+            },
+            {
+              "label_key": "module.hw_cpu.bus_clock",
+              "value": "100 MHz"
+            },
+            {
+              "label_key": "module.hw_cpu.l2",
+              "value": "3.0 MB"
+            },
+            {
+              "label_key": "module.hw_cpu.l3",
+              "value": "32.0 MB"
+            },
+            {
+              "label_key": "module.hw_cpu.architecture",
+              "value": "x64"
+            },
+            {
+              "label_key": "module.hw_cpu.widths",
+              "value": "64 / 64 bit"
+            },
+            {
+              "label_key": "module.hw_cpu.processor_id",
+              "value": "REDACTED"
+            },
+            {
+              "label_key": "module.hw_cpu.virtualization",
+              "value": "",
+              "value_key": "common.value.yes"
+            },
+            {
+              "label_key": "module.hw_cpu.slat",
+              "value": "",
+              "value_key": "common.value.no"
+            },
+            {
+              "label_key": "module.hw_cpu.vm_extensions",
+              "value": "",
+              "value_key": "common.value.no"
+            },
+            {
+              "label_key": "module.hw_cpu.load",
+              "value": "33 %"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "level": "info",
+          "text_key": "module.hw_cpu.note.temperature"
+        }
+      ]
+    }
+  ]
+}

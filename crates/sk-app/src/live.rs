@@ -7,12 +7,14 @@
 use serde::Deserialize;
 use sk_core::live::{LiveHistory, LiveSample, percent_of};
 use sk_core::providers::{NS_CIMV2, NS_WMI, WmiProvider};
+use sk_core::queries;
 
 const PROCESSOR_QUERY: &str =
     "SELECT Name, PercentProcessorTime FROM Win32_PerfFormattedData_PerfOS_Processor";
-const PERFORMANCE_QUERY: &str = "SELECT Active, frequency FROM ProcessorPerformance";
-const MEMORY_QUERY: &str = "SELECT FreePhysicalMemory, TotalVisibleMemorySize \
-     FROM Win32_OperatingSystem";
+// Te same zapytania co `hw.cpu` i `system.info` — inaczej cache WMI nie trafia
+// i jedna runda zbiera tę samą klasę dwa razy.
+const PERFORMANCE_QUERY: &str = queries::PROCESSOR_PERFORMANCE;
+const MEMORY_QUERY: &str = queries::WIN32_OPERATING_SYSTEM;
 
 #[derive(Debug, Deserialize)]
 struct ProcessorCounter {

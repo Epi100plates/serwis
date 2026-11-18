@@ -51,6 +51,14 @@ impl Module for Live {
         }
 
         let last = window.last().copied().unwrap_or(LiveSample::new(0.0));
+        // Faktyczna kadencja bywa inna niż nominalna 1 s — zależy od czasu
+        // odpowiedzi WMI, więc pokazujemy zmierzoną, a nie obiecywaną.
+        let average_interval = match (window.first(), window.last()) {
+            (Some(first), Some(last)) if window.len() > 1 => {
+                Some((last.elapsed_secs - first.elapsed_secs) / (window.len() - 1) as f64)
+            }
+            _ => None,
+        };
         let mut blocks = vec![Block::key_values(vec![
             KeyValue::new(
                 "module.system_live.samples",
@@ -59,6 +67,11 @@ impl Module for Live {
             KeyValue::new(
                 "module.system_live.window",
                 format!("{:.0} s", window.last().map_or(0.0, |s| s.elapsed_secs)),
+            ),
+            KeyValue::new(
+                "module.system_live.interval",
+                average_interval
+                    .map_or_else(|| "-".to_string(), |interval| format!("{interval:.2} s")),
             ),
             KeyValue::new(
                 "module.system_live.cpu_load",
@@ -112,7 +125,8 @@ impl Module for Live {
             "schema_version": 1,
             "sample_count": samples.len(),
             "window_samples": window.len(),
-            "interval_secs": 1,
+            "nominal_interval_secs": 1,
+            "avg_interval_secs": average_interval,
             "samples": window
                 .iter()
                 .map(|sample| serde_json::json!({
@@ -212,6 +226,14 @@ mod tests {
         assert_eq!(output.data["window_samples"], MAX_CHART_POINTS);
         let first = &output.data["samples"][0]["t"];
         assert_eq!(first, 50.0);
+    }
+
+    #[test]
+    fn reports_measured_sample_interval() {
+        let output = Live.collect(&harness(5).ctx()).expect("zbieranie danych");
+        assert_eq!(output.data["avg_interval_secs"], 1.0);
+        assert_eq!(output.data["nominal_interval_secs"], 1);
+        assert!(output.view.uses_key("module.system_live.interval"));
     }
 
     #[test]

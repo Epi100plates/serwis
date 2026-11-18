@@ -13,6 +13,7 @@ cargo fmt --all                       # formatowanie
 cargo clippy --all-targets -- -D warnings
 cargo test --all                      # testy bez sprzętu (mocki)
 cargo test -p sk-modules --test hardware -- --ignored   # testy sprzętowe: prawdziwe WMI tej maszyny
+cargo test -p sk-modules --test golden                  # golden widoków (kształt raportu)
 cargo test -p sk-win -- --ignored     # testy sprzętowe warstwy Windows (rejestr/EDID/firmware)
 cargo run -p sk-app                   # GUI
 cargo run -p sk-app -- report --json out.json              # tryb CLI: raport JSON
@@ -85,6 +86,9 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 - `MockWmi` wybiera odpowiedź po **najdłuższym** pasującym fragmencie zapytania (inaczej `Win32_PhysicalMemoryArray` łapie odpowiedź dla `Win32_PhysicalMemory`).
 - Raport HTML powstaje z modelu `View` (`sk-app/src/html.rs`), nie z szablonów per moduł; wykresy to inline SVG. Nie dodawaj `askama`.
 - Telemetria: próbki zbiera wątek roboczy (`sk-app/src/live.rs`) raz na sekundę **tylko gdy `system.live` jest otwarte**; bufor 600 próbek. `collect()` modułu nie próbkuje.
+- Zapytania o klasy używane w kilku miejscach żyją w `sk_core::queries` (`WIN32_OPERATING_SYSTEM`, `WIN32_VIDEO_CONTROLLER`, `PROCESSOR_PERFORMANCE`, `WIN32_COMPUTER_SYSTEM`). Cache jest kluczowany po `(namespace, WQL)`, więc inna lista pól = drugie zapytanie w rundzie. Statystyki widać w raporcie (`wmi_cache`) — na tej maszynie 16 zapytań i 1 trafienie na 10 modułów.
+- Stany w komórkach tabeli: `Table::with_value_key(row, column, "common.value.digital")`. Nie wpisuj do komórki słów typu „Digital”/„None”.
+- Golden: `crates/sk-modules/tests/golden/*.json` pilnują kształtu widoków `hw.cpu` i `hw.memory`; odświeżanie tylko świadome: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`.
 - Sprawdzanie GUI: `PrintWindow` **nie** przechwytuje treści renderowanej przez wgpu (dostajesz biały obraz). Użyj `CopyFromScreen` po `SetForegroundWindow` albo `egui_kittest` w testach.
 
 **PowerShell w tym środowisku (5.1, tylko `powershell.exe`):**

@@ -40,6 +40,7 @@
   "module.hw_memory.col.type": "Type",
   "module.hw_memory.col.form_factor": "Form factor",
   "module.hw_memory.col.voltage": "Voltage",
+  "module.hw_memory.note.no_array": "The system reports no memory array (incomplete SMBIOS) — board limits unavailable.",
   "module.hw_memory.note.no_modules": "The system reports no memory modules — SMBIOS data is incomplete.",
 
   "module.hw_board.name": "Motherboard",
@@ -92,6 +93,7 @@
   "module.hw_monitor.mode.depth": "Colour depth",
   "module.hw_monitor.mode.monitors": "Detected monitors",
   "module.hw_monitor.note.none": "The system reports no monitor (for example remote desktop or no EDID).",
+  "module.hw_monitor.note.no_mode": "No current display mode data from the graphics adapter.",
   "module.hw_monitor.note.no_edid": "Some monitors have no EDID block — native mode and diagonal may be unknown.",
 
   "module.hw_battery.name": "Battery",
@@ -131,10 +133,11 @@
   "module.hw_disk_inventory.note.usb": "Some drives are connected over USB — such bridges often do not pass SMART or media size.",
 
   "module.system_live.name": "Live telemetry",
-  "module.system_live.desc": "Charts of CPU load, clock and memory usage. One sample per second, history kept in memory.",
+  "module.system_live.desc": "Charts of CPU load, clock and memory usage. Roughly one sample per second, history kept in memory.",
   "module.system_live.section": "Telemetry timeline",
   "module.system_live.samples": "Samples (visible / all)",
   "module.system_live.window": "Time window",
+  "module.system_live.interval": "Average sample interval",
   "module.system_live.cpu_load": "CPU load",
   "module.system_live.cpu_frequency": "CPU clock",
   "module.system_live.ram_used": "RAM usage",
@@ -142,5 +145,5 @@
   "module.system_live.chart.ram": "Memory usage",
   "module.system_live.chart.frequency": "Processor clock",
   "module.system_live.note.waiting": "No samples yet — telemetry is collected live in the GUI, so a one-off report has no data for this module.",
-  "module.system_live.note.interval": "Sampling runs once per second in the worker thread, so the interface stays responsive."
+  "module.system_live.note.interval": "Sampling runs in the worker thread, so the interface stays responsive; the real pace depends on WMI response time."
 }

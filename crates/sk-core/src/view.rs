@@ -68,7 +68,12 @@ impl Section {
                         }
                     }
                 }
-                Block::Table { table } => out.extend(table.headers.iter().cloned()),
+                Block::Table { table } => {
+                    out.extend(table.headers.iter().cloned());
+                    for cells in &table.value_keys {
+                        out.extend(cells.iter().flatten().cloned());
+                    }
+                }
                 Block::Note { text_key, .. } | Block::Badge { text_key } => {
                     out.push(text_key.clone());
                 }
@@ -199,11 +204,40 @@ impl ChartSeries {
 pub struct Table {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
+    /// Klucze i18n dla pojedynczych komórek — dla stanów („Cyfrowe”, „Tak”).
+    /// Puste, gdy wszystkie komórki to dane; wtedy nie zaśmieca JSON-u.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub value_keys: Vec<Vec<Option<String>>>,
 }
 
 impl Table {
     pub fn new(headers: Vec<String>, rows: Vec<Vec<String>>) -> Self {
-        Self { headers, rows }
+        Self {
+            headers,
+            rows,
+            value_keys: Vec::new(),
+        }
+    }
+
+    /// Oznacza komórkę `(row, column)` kluczem i18n; wartość z `rows` jest wtedy
+    /// pomijana przez renderer (tak samo jak `KeyValue::state`).
+    pub fn with_value_key(mut self, row: usize, column: usize, key: impl Into<String>) -> Self {
+        while self.value_keys.len() <= row {
+            self.value_keys.push(Vec::new());
+        }
+        let cells = &mut self.value_keys[row];
+        while cells.len() <= column {
+            cells.push(None);
+        }
+        cells[column] = Some(key.into());
+        self
+    }
+
+    pub fn value_key(&self, row: usize, column: usize) -> Option<&str> {
+        self.value_keys
+            .get(row)
+            .and_then(|cells| cells.get(column))
+            .and_then(Option::as_deref)
     }
 }
 
@@ -307,6 +341,39 @@ mod tests {
             json["sections"][0]["blocks"][0]["rows"][0]["value_key"],
             "common.value.yes"
         );
+    }
+
+    #[test]
+    fn table_value_keys_are_collected_as_translation_keys() {
+        let table = Table::new(
+            vec!["test.col".to_string()],
+            vec![vec!["surowe".to_string()]],
+        )
+        .with_value_key(0, 0, "common.value.digital");
+        let view = View::new(vec![Section::new("test.section").with_blocks(vec![
+            Block::Table {
+                table: table.clone(),
+            },
+        ])]);
+
+        assert!(view.uses_key("test.section"));
+        assert!(view.uses_key("test.col"));
+        assert!(view.uses_key("common.value.digital"));
+        assert_eq!(table.value_key(0, 0), Some("common.value.digital"));
+        assert_eq!(table.value_key(1, 0), None);
+
+        let json = serde_json::to_value(&view).expect("json");
+        assert_eq!(
+            json["sections"][0]["blocks"][0]["table"]["value_keys"][0][0],
+            "common.value.digital"
+        );
+    }
+
+    #[test]
+    fn empty_table_value_keys_are_not_serialized() {
+        let table = Table::new(vec!["test.col".to_string()], vec![vec!["x".to_string()]]);
+        let json = serde_json::to_value(table).expect("json");
+        assert!(json.get("value_keys").is_none(), "{json}");
     }
 
     #[test]

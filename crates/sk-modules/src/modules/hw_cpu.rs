@@ -10,8 +10,7 @@ const PROCESSOR_QUERY: &str = "SELECT Caption, Name, Manufacturer, SocketDesigna
      L2CacheSize, L3CacheSize, AddressWidth, DataWidth, Architecture, ProcessorId, \
      VirtualizationFirmwareEnabled, VMMonitorModeExtensions, \
      SecondLevelAddressTranslationExtensions, LoadPercentage FROM Win32_Processor";
-const PERFORMANCE_QUERY: &str =
-    "SELECT Active, InstanceName, frequency, percentage FROM ProcessorPerformance";
+const PERFORMANCE_QUERY: &str = queries::PROCESSOR_PERFORMANCE;
 
 #[derive(Debug, Default, Deserialize)]
 struct Processor {
@@ -103,6 +102,7 @@ impl Module for Cpu {
             .max();
         let live_percent = performance
             .iter()
+            .filter(|row| row.active.unwrap_or(true))
             .filter_map(|row| row.percent_frequency)
             .max();
 

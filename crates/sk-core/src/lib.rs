@@ -9,6 +9,7 @@ pub mod i18n;
 pub mod live;
 pub mod module;
 pub mod providers;
+pub mod queries;
 pub mod registry;
 pub mod view;
 
@@ -25,6 +26,7 @@ pub mod prelude {
         AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, NS_CIMV2, NS_WMI,
         WmiProvider,
     };
+    pub use crate::queries;
     pub use crate::registry::ModuleRegistry;
     pub use crate::view::{
         Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, Table, View,

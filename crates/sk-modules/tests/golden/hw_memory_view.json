@@ -1,0 +1,73 @@
+{
+  "sections": [
+    {
+      "title_key": "module.hw_memory.section",
+      "subtitle": null,
+      "blocks": [
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.hw_memory.modules_count",
+              "value": "2"
+            },
+            {
+              "label_key": "module.hw_memory.total",
+              "value": "32.0 GB"
+            },
+            {
+              "label_key": "module.hw_memory.slots",
+              "value": "2 / 2"
+            },
+            {
+              "label_key": "module.hw_memory.max_capacity",
+              "value": "128.0 GB"
+            },
+            {
+              "label_key": "module.hw_memory.ecc",
+              "value": "",
+              "value_key": "common.value.none"
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "table": {
+            "headers": [
+              "module.hw_memory.col.slot",
+              "module.hw_memory.col.size",
+              "module.hw_memory.col.speed",
+              "module.hw_memory.col.vendor",
+              "module.hw_memory.col.part",
+              "module.hw_memory.col.type",
+              "module.hw_memory.col.form_factor",
+              "module.hw_memory.col.voltage"
+            ],
+            "rows": [
+              [
+                "DIMM 0 (P0 CHANNEL A)",
+                "16.0 GB",
+                "3200 MHz",
+                "Kingston",
+                "KF3200C16D4/16GX",
+                "DDR4",
+                "DIMM",
+                "1.20 V"
+              ],
+              [
+                "DIMM 0 (P0 CHANNEL B)",
+                "16.0 GB",
+                "3200 MHz",
+                "Kingston",
+                "KF3200C16D4/16GX",
+                "DDR4",
+                "DIMM",
+                "1.20 V"
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

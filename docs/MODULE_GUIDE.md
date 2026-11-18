@@ -129,6 +129,12 @@ pub struct KeyValue {
     pub value_key: Option<String>,     // alternatywa: klucz i18n (np. Tak/Nie)
 }
 
+pub struct Table {
+    pub headers: Vec<String>,          // klucze i18n
+    pub rows: Vec<Vec<String>>,        // dane
+    pub value_keys: Vec<Vec<Option<String>>>, // klucze i18n dla pojedynczych komórek
+}
+
 pub struct Chart {
     pub title_key: String,             // etykieta wykresu = klucz i18n
     pub x_label: String,               // jednostka osi, np. "s"
@@ -138,6 +144,10 @@ pub struct Chart {
 ```
 
 Reguła rozróżniania tekstu i danych: **kluczem i18n jest wszystko, co jest zdaniem lub etykietą** (nazwy sekcji, nagłówki tabel, etykiety wierszy, komunikaty, wartości logiczne). **Daną jest to, co przyszło z WMI lub z obliczeń** (nazwa procesora, numer seryjny, „3200 MHz”, „2010‑W46”). Nie wpisuj do wartości słów typu „tydzień” — wybierz format neutralny językowo (ISO 8601) albo użyj `value_key`.
+
+Dla stanów w **tabeli** użyj `Table::with_value_key(row, column, "common.value.digital")` — komórka jest wtedy tłumaczona tak samo jak `KeyValue::state`. Przykład: kolumna „Wejście” w `hw.monitor` (cyfrowe/analogowe) i kolumna stanu w `hw.disk_inventory`.
+
+Zapytania o klasy używane w więcej niż jednym module trzymamy w `sk_core::queries` (np. `WIN32_VIDEO_CONTROLLER`, `PROCESSOR_PERFORMANCE`). Cache WMI jest kluczowany po `(przestrzeń nazw, zapytanie)`, więc dwie różne listy pól tej samej klasy to dwa zapytania w rundzie — jedna stała = jedno zapytanie.
 
 Rejestracja: **jawna lista** w `crates/sk-modules/src/modules/mod.rs`:
 
@@ -342,7 +352,10 @@ Próbki zbiera wątek roboczy aplikacji (`sk-app/src/live.rs`) i tylko wtedy, gd
 | jednostkowy na makiecie | logika bez sprzętu | w pliku modułu |
 | kompletność kluczy i18n | brak „martwych” napisów | w pliku modułu (`Translator::load` + `has`) |
 | kontrakt (automatyczny) | unikalne `id`, klucze metadanych, brak paniki | `crates/sk-modules/tests/contract.rs` — nic nie dopisujesz |
+| golden widoku | stabilny kształt raportu (JSON) | `crates/sk-modules/tests/golden.rs` — dopisz swój moduł, jeśli jego widok jest kontraktem |
 | sprzętowy `#[ignore]` | realne WMI na maszynie serwisowej | `crates/sk-modules/tests/hardware.rs` — dopisz swój `id` do listy modułów, jeśli chcesz go tam objąć |
+
+Wzorce golden odświeżasz świadomie: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`, potem commit z opisem, dlaczego widok się zmienił.
 
 Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`.
 

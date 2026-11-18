@@ -37,6 +37,8 @@ enum Event {
         id: &'static str,
         result: Result<ModuleOutput, String>,
     },
+    /// Aktualizacja `system.live` — nie zwalnia blokady `CollectAll`.
+    LiveSample(Result<ModuleOutput, String>),
     Done,
     ExportDone(Result<String, String>),
 }
@@ -118,6 +120,11 @@ impl SerwisApp {
     }
 
     fn request_refresh(&mut self) {
+        // Kliknięcia w trakcie rundy nie kolejkują kolejnych pełnych zbierzeń:
+        // kanał jest nieograniczony, więc bez tego 5 kliknięć = 5 rund WMI.
+        if self.pending {
+            return;
+        }
         self.pending = true;
         self.status = None;
         if let Some(jobs) = &self.jobs {
@@ -134,7 +141,13 @@ impl SerwisApp {
             && jobs.send(Job::SampleLive).is_ok()
         {
             self.live_pending = true;
-            self.next_live_at = Instant::now() + LIVE_INTERVAL;
+            // Termin liczymy od poprzedniego, żeby kadencja nie dryfowała;
+            // jeśli UI zaspało, wracamy do „teraz + 1 s” bez serii próbek.
+            let mut next = self.next_live_at + LIVE_INTERVAL;
+            if next <= Instant::now() {
+                next = Instant::now() + LIVE_INTERVAL;
+            }
+            self.next_live_at = next;
         }
     }
 
@@ -158,10 +171,12 @@ impl SerwisApp {
         loop {
             match self.events.try_recv() {
                 Ok(Event::Module { id, result }) => {
-                    if id == LIVE_MODULE_ID {
-                        self.live_pending = false;
-                    }
                     self.results.insert(id, result);
+                    received = true;
+                }
+                Ok(Event::LiveSample(result)) => {
+                    self.live_pending = false;
+                    self.results.insert(LIVE_MODULE_ID, result);
                     received = true;
                 }
                 Ok(Event::Done) => {
@@ -328,8 +343,12 @@ impl eframe::App for SerwisApp {
 
         if self.selected == Some(LIVE_MODULE_ID) {
             self.request_live_sample();
-            // Wybudzaj UI na tyle często, żeby próbka była pobrana blisko terminu.
-            ctx.request_repaint_after(Duration::from_millis(250));
+            // Wybudź UI dokładnie na kolejną próbkę (min. 50 ms, żeby nie zapętlić).
+            let wait = self
+                .next_live_at
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_millis(50));
+            ctx.request_repaint_after(wait);
         }
         if self.pending {
             ctx.request_repaint_after(Duration::from_millis(200));
@@ -386,13 +405,7 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
                     continue;
                 };
                 let result = module.collect(&ctx).map_err(|err| err.to_string());
-                if events
-                    .send(Event::Module {
-                        id: LIVE_MODULE_ID,
-                        result,
-                    })
-                    .is_err()
-                {
+                if events.send(Event::LiveSample(result)).is_err() {
                     return;
                 }
             }
@@ -410,7 +423,8 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
                     module_filter: None,
                     app_version: env!("CARGO_PKG_VERSION"),
                 };
-                let report = Report::collect(&registry, &ctx, &options);
+                let report = Report::collect(&registry, &ctx, &options)
+                    .with_wmi_stats(wmi.cache_stats().into());
                 let result = write_report_html(&report, locale, &path);
                 if events.send(Event::ExportDone(result)).is_err() {
                     return;

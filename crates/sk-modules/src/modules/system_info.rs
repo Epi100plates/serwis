@@ -6,10 +6,8 @@ use sk_core::prelude::*;
 
 use crate::util::{bool_row, decode_first, format_bytes, text};
 
-const OS_QUERY: &str = "SELECT Caption, Version, BuildNumber, OSArchitecture \
-     FROM Win32_OperatingSystem";
-const COMPUTER_QUERY: &str = "SELECT Manufacturer, Model, TotalPhysicalMemory, \
-     HypervisorPresent, PCSystemType, NumberOfLogicalProcessors FROM Win32_ComputerSystem";
+const OS_QUERY: &str = queries::WIN32_OPERATING_SYSTEM;
+const COMPUTER_QUERY: &str = queries::WIN32_COMPUTER_SYSTEM;
 
 #[derive(Debug, Default, Deserialize)]
 struct OperatingSystem {
@@ -104,7 +102,7 @@ impl Module for SystemInfo {
                     ),
                     KeyValue::new(
                         "module.system_info.os.arch",
-                        text(os.os_architecture.as_deref()),
+                        architecture_text(os.os_architecture.as_deref()),
                     ),
                 ]),
                 Block::badge(if elevated {
@@ -125,7 +123,8 @@ impl Module for SystemInfo {
                 "caption": os.caption,
                 "version": os.version,
                 "build_number": os.build_number,
-                "architecture": os.os_architecture,
+                "architecture": architecture_text(os.os_architecture.as_deref()),
+                "architecture_raw": os.os_architecture,
             },
             "host": {
                 "manufacturer": computer.manufacturer,
@@ -141,6 +140,17 @@ impl Module for SystemInfo {
         });
 
         Ok(ModuleOutput { data, view })
+    }
+}
+
+/// Windows lokalizuje `OSArchitecture` (na tej maszynie `64-bitowy`). Sprowadzamy
+/// do formy neutralnej językowo, żeby raport EN nie zawierał polskiego słowa.
+fn architecture_text(raw: Option<&str>) -> String {
+    match raw.map(str::trim) {
+        Some(value) if value.contains("64") => "64-bit".to_string(),
+        Some(value) if value.contains("32") => "32-bit".to_string(),
+        Some(value) if !value.is_empty() => value.to_string(),
+        _ => "-".to_string(),
     }
 }
 
@@ -258,6 +268,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn normalises_localised_architecture_string() {
+        assert_eq!(architecture_text(Some("64-bitowy")), "64-bit");
+        assert_eq!(architecture_text(Some("64-bit")), "64-bit");
+        assert_eq!(architecture_text(Some("32-bit")), "32-bit");
+        assert_eq!(architecture_text(Some("x86")), "x86");
+        assert_eq!(architecture_text(None), "-");
     }
 
     #[test]

@@ -8,7 +8,7 @@
     "DesignVoltage": 11400,
     "DeviceID": "BATTERY\\ACPI\\PNP0C0A\\1_0",
     "EstimatedChargeRemaining": 81,
-    "EstimatedRunTime": 71582788,
+    "EstimatedRunTime": 132,
     "Name": "Bateria z metodą ACPI",
     "PNPDeviceID": "ACPI\\PNP0C0A\\1_0",
     "PowerOnline": true,

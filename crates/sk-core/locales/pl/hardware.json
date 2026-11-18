@@ -40,6 +40,7 @@
   "module.hw_memory.col.type": "Typ",
   "module.hw_memory.col.form_factor": "Format",
   "module.hw_memory.col.voltage": "Napięcie",
+  "module.hw_memory.note.no_array": "System nie zgłasza tablicy pamięci (SMBIOS niekompletny) — limity płyty niedostępne.",
   "module.hw_memory.note.no_modules": "System nie zgłasza żadnego modułu pamięci — dane SMBIOS są niepełne.",
 
   "module.hw_board.name": "Płyta główna",
@@ -92,6 +93,7 @@
   "module.hw_monitor.mode.depth": "Głębia kolorów",
   "module.hw_monitor.mode.monitors": "Wykryte monitory",
   "module.hw_monitor.note.none": "System nie zgłasza żadnego monitora (np. zdalny pulpit lub brak EDID).",
+  "module.hw_monitor.note.no_mode": "Brak danych o bieżącym trybie z karty graficznej.",
   "module.hw_monitor.note.no_edid": "Dla części monitorów brak bloku EDID — tryb natywny i przekątna mogą być nieznane.",
 
   "module.hw_battery.name": "Bateria",
@@ -131,10 +133,11 @@
   "module.hw_disk_inventory.note.usb": "Część dysków jest podłączona przez USB — takie mostki często nie przekazują SMART ani rozmiaru nośnika.",
 
   "module.system_live.name": "Telemetria na żywo",
-  "module.system_live.desc": "Wykresy obciążenia procesora, taktowania i zużycia pamięci. Próbki co sekundę, historia w pamięci.",
+  "module.system_live.desc": "Wykresy obciążenia procesora, taktowania i zużycia pamięci. Próbki w przybliżeniu co sekundę, historia w pamięci.",
   "module.system_live.section": "Przebieg telemetrii",
   "module.system_live.samples": "Próbki (widoczne / wszystkie)",
   "module.system_live.window": "Okno czasu",
+  "module.system_live.interval": "Średni odstęp próbek",
   "module.system_live.cpu_load": "Obciążenie CPU",
   "module.system_live.cpu_frequency": "Taktowanie CPU",
   "module.system_live.ram_used": "Zużycie RAM",
@@ -142,5 +145,5 @@
   "module.system_live.chart.ram": "Zużycie pamięci",
   "module.system_live.chart.frequency": "Taktowanie procesora",
   "module.system_live.note.waiting": "Brak próbek — telemetria jest zbierana na bieżąco w GUI, w raporcie jednorazowym ten moduł nie ma jeszcze danych.",
-  "module.system_live.note.interval": "Próbkowanie odbywa się raz na sekundę w wątku roboczym, więc interfejs nie zwalnia."
+  "module.system_live.note.interval": "Próbkowanie odbywa się w wątku roboczym, więc interfejs nie zwalnia; faktyczne tempo zależy od czasu odpowiedzi WMI."
 }

@@ -5,9 +5,7 @@ use sk_core::prelude::*;
 
 use crate::util::{date_only, decode_all, format_bytes, text};
 
-const GPU_QUERY: &str = "SELECT Name, AdapterCompatibility, VideoProcessor, DriverVersion, \
-     DriverDate, AdapterRAM, CurrentHorizontalResolution, CurrentVerticalResolution, \
-     CurrentRefreshRate, CurrentBitsPerPixel FROM Win32_VideoController";
+const GPU_QUERY: &str = queries::WIN32_VIDEO_CONTROLLER;
 
 /// Wartość, od której `AdapterRAM` jest już obcięte. Pole jest 32-bitowe,
 /// a sterowniki raportują maksimum 4 GiB minus 1 MiB (4 293 918 720 B) —

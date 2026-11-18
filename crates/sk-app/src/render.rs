@@ -85,9 +85,12 @@ fn table_ui(ui: &mut egui::Ui, table: &Table, translator: &Translator) {
             }
             ui.end_row();
 
-            for row in &table.rows {
-                for index in 0..table.headers.len() {
-                    let value = row.get(index).map(String::as_str).unwrap_or("-");
+            for (row_index, row) in table.rows.iter().enumerate() {
+                for column in 0..table.headers.len() {
+                    let value = match table.value_key(row_index, column) {
+                        Some(key) => translator.t(key),
+                        None => row.get(column).cloned().unwrap_or_else(|| "-".to_string()),
+                    };
                     ui.monospace(value);
                 }
                 ui.end_row();

@@ -15,8 +15,7 @@ const MONITOR_QUERY: &str = "SELECT Active, InstanceName, ManufacturerName, Prod
      SerialNumberID, UserFriendlyName, WeekOfManufacture, YearOfManufacture FROM WmiMonitorID";
 const DISPLAY_PARAMS_QUERY: &str = "SELECT InstanceName, MaxHorizontalImageSize, \
      MaxVerticalImageSize, VideoInputType FROM WmiMonitorBasicDisplayParams";
-const MODE_QUERY: &str = "SELECT Name, CurrentHorizontalResolution, CurrentVerticalResolution, \
-     CurrentRefreshRate, CurrentBitsPerPixel FROM Win32_VideoController";
+const MODE_QUERY: &str = queries::WIN32_VIDEO_CONTROLLER;
 
 #[derive(Debug, Default, Deserialize)]
 struct MonitorId {
@@ -44,6 +43,8 @@ struct DisplayParams {
     width_cm: Option<u8>,
     #[serde(rename = "MaxVerticalImageSize", default)]
     height_cm: Option<u8>,
+    #[serde(rename = "VideoInputType", default)]
+    video_input_type: Option<u8>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -101,6 +102,7 @@ impl Module for Monitor {
             .unwrap_or_default();
 
         let mut rows = Vec::new();
+        let mut input_keys: Vec<Option<&'static str>> = Vec::new();
         let mut data_monitors = Vec::new();
 
         for monitor in &monitors {
@@ -153,10 +155,17 @@ impl Module for Monitor {
                 .as_ref()
                 .and_then(|info| info.max_refresh_hz)
                 .map_or_else(|| "-".to_string(), |hz| format!("{hz} Hz"));
-            let input = match info.as_ref().map(|info| info.digital) {
-                Some(true) => "Digital".to_string(),
-                Some(false) => "Analog".to_string(),
-                None => "-".to_string(),
+            // `VideoInputType` z WMI (0 = analogowe, 1 = cyfrowe) jest wiarygodniejszy
+            // niż EDID; EDID zostaje jako fallback. Wartość to stan, więc jedzie
+            // kluczem i18n, a nie słowem wpisanym w kod.
+            let input_digital = physical
+                .and_then(|params| params.video_input_type)
+                .map(|input| input == 1)
+                .or_else(|| info.as_ref().map(|info| info.digital));
+            let input_key = match input_digital {
+                Some(true) => Some("common.value.digital"),
+                Some(false) => Some("common.value.analog"),
+                None => None,
             };
 
             rows.push(vec![
@@ -166,8 +175,9 @@ impl Module for Monitor {
                 diagonal,
                 native,
                 max_refresh,
-                input,
+                input_digital.map_or_else(|| "-".to_string(), |digital| digital.to_string()),
             ]);
+            input_keys.push(input_key);
 
             data_monitors.push(serde_json::json!({
                 "instance_name": instance,
@@ -183,23 +193,29 @@ impl Module for Monitor {
                 "max_refresh_hz": info.as_ref().and_then(|info| info.max_refresh_hz),
                 "edid_year": info.as_ref().map(|info| info.year),
                 "edid_present": info.is_some(),
+                "input_digital": input_digital,
             }));
         }
 
-        let mut blocks = vec![Block::Table {
-            table: Table::new(
-                vec![
-                    "module.hw_monitor.col.monitor".to_string(),
-                    "module.hw_monitor.col.vendor".to_string(),
-                    "module.hw_monitor.col.production".to_string(),
-                    "module.hw_monitor.col.diagonal".to_string(),
-                    "module.hw_monitor.col.native".to_string(),
-                    "module.hw_monitor.col.max_refresh".to_string(),
-                    "module.hw_monitor.col.input".to_string(),
-                ],
-                rows,
-            ),
-        }];
+        let mut table = Table::new(
+            vec![
+                "module.hw_monitor.col.monitor".to_string(),
+                "module.hw_monitor.col.vendor".to_string(),
+                "module.hw_monitor.col.production".to_string(),
+                "module.hw_monitor.col.diagonal".to_string(),
+                "module.hw_monitor.col.native".to_string(),
+                "module.hw_monitor.col.max_refresh".to_string(),
+                "module.hw_monitor.col.input".to_string(),
+            ],
+            rows,
+        );
+        for (row_index, key) in input_keys.iter().enumerate() {
+            if let Some(key) = key {
+                table = table.with_value_key(row_index, 6, *key);
+            }
+        }
+
+        let mut blocks = vec![Block::Table { table }];
 
         if data_monitors
             .iter()
@@ -239,7 +255,16 @@ impl Module for Monitor {
             number(Some(monitors.len())),
         ));
 
+        let mode_missing = current_mode.width.is_none()
+            && current_mode.height.is_none()
+            && current_mode.refresh_hz.is_none();
         blocks.push(Block::key_values(mode_rows));
+        if mode_missing {
+            blocks.push(Block::note(
+                NoteLevel::Info,
+                "module.hw_monitor.note.no_mode",
+            ));
+        }
 
         let view = View::new(vec![
             Section::new("module.hw_monitor.section").with_blocks(blocks),
@@ -364,6 +389,27 @@ mod tests {
         assert!(output.view.uses_key("module.hw_monitor.note.no_edid"));
         // Rozmiar i tak jest — z WmiMonitorBasicDisplayParams.
         assert_eq!(output.data["monitors"][0]["diagonal_cm"][0], 41);
+    }
+
+    #[test]
+    fn input_is_translated_state_not_prose() {
+        let output = Monitor.collect(&harness().ctx()).expect("zbieranie danych");
+        assert!(output.view.uses_key("common.value.digital"));
+        let table = output.view.sections[0]
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Table { table } => Some(table),
+                _ => None,
+            })
+            .expect("tabela monitorów");
+        for row in &table.rows {
+            for cell in row {
+                assert_ne!(cell, "Digital", "proza w komórce tabeli");
+                assert_ne!(cell, "Analog", "proza w komórce tabeli");
+            }
+        }
+        assert_eq!(table.value_key(0, 6), Some("common.value.digital"));
     }
 
     #[test]

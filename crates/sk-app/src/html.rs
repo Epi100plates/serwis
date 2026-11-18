@@ -221,11 +221,14 @@ fn table_html(out: &mut String, table: &sk_core::view::Table, translator: &Trans
         let _ = writeln!(out, "<th>{}</th>", escape(&translator.t(header)));
     }
     out.push_str("</tr>\n</thead>\n<tbody>");
-    for row in &table.rows {
+    for (row_index, row) in table.rows.iter().enumerate() {
         out.push_str("<tr>");
-        for index in 0..table.headers.len() {
-            let value = row.get(index).map_or("-", String::as_str);
-            let _ = writeln!(out, "<td class=\"mono\">{}</td>", escape(value));
+        for column in 0..table.headers.len() {
+            let value = match table.value_key(row_index, column) {
+                Some(key) => translator.t(key),
+                None => row.get(column).cloned().unwrap_or_else(|| "-".to_string()),
+            };
+            let _ = writeln!(out, "<td class=\"mono\">{}</td>", escape(&value));
         }
         out.push_str("</tr>");
     }
@@ -242,23 +245,25 @@ fn chart_svg(chart: &Chart) -> String {
 
     let mut max_x: f64 = 0.0;
     let mut max_y: f64 = 0.0;
+    let mut any_point = false;
     for series in &chart.series {
         for [x, y] in &series.points {
-            if x.is_finite() && *x > max_x {
-                max_x = *x;
-            }
-            if y.is_finite() && *y > max_y {
-                max_y = *y;
+            if x.is_finite() && y.is_finite() {
+                any_point = true;
+                max_x = max_x.max(*x);
+                max_y = max_y.max(*y);
             }
         }
     }
-    if max_x <= 0.0 || max_y <= 0.0 {
+    if !any_point || max_x <= 0.0 {
         return String::new();
     }
+    // Procenty zawsze skalujemy 0–100 (seria samych zer to nie powód, by
+    // wykres znikał); dla innych jednostek unikamy dzielenia przez zero.
     let max_y = if chart.y_label == "%" {
         100.0_f64.max(max_y)
     } else {
-        max_y * 1.05
+        (max_y * 1.05).max(1.0)
     };
 
     let plot_width = WIDTH - 2.0 * PAD;
@@ -471,6 +476,17 @@ mod tests {
         // Skala 0–100%: punkt (0 s, 10%) pada w (26.0, 141.2) px.
         assert!(svg.contains("26.0,141.2"), "{svg}");
         assert!(svg.contains(">%<"), "oś Y z jednostką: {svg}");
+    }
+
+    #[test]
+    fn all_zero_percent_series_still_draws() {
+        let chart = Chart::new("module.system_live.chart.cpu", "s", "%").with_series(vec![
+            ChartSeries::new("CPU", vec![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]),
+        ]);
+        let svg = chart_svg(&chart);
+        assert!(svg.contains("<polyline"), "{svg}");
+        // Skala 0–100%: y = 0 pada na dolną krawędź (26 + 128 = 154 px).
+        assert!(svg.contains("26.0,154.0"), "{svg}");
     }
 
     #[test]

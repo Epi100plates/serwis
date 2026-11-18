@@ -43,6 +43,23 @@ pub struct ModuleFailure {
     pub error: String,
 }
 
+/// Statystyki cache WMI z rundy zbierania — dowód, że jedno zapytanie na klasę
+/// faktycznie wystarcza (trafienia vs pudła).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct WmiStats {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl From<sk_win::CacheStats> for WmiStats {
+    fn from(stats: sk_win::CacheStats) -> Self {
+        Self {
+            hits: stats.hits,
+            misses: stats.misses,
+        }
+    }
+}
+
 /// Wynik jednego przebiegu zbierania.
 pub struct Report {
     pub app_version: &'static str,
@@ -52,6 +69,8 @@ pub struct Report {
     pub uptime_secs: u64,
     pub modules: Vec<ModuleEntry>,
     pub errors: Vec<ModuleFailure>,
+    /// Uzupełniane przez wywołującego po zbieraniu (`WinWmi::cache_stats`).
+    pub wmi_stats: Option<WmiStats>,
 }
 
 impl Report {
@@ -90,7 +109,14 @@ impl Report {
             uptime_secs: ctx.clock.uptime_secs(),
             modules,
             errors,
+            wmi_stats: None,
         }
+    }
+
+    /// Dokłada statystyki cache WMI (znane dopiero po zakończeniu zbierania).
+    pub fn with_wmi_stats(mut self, stats: WmiStats) -> Self {
+        self.wmi_stats = Some(stats);
+        self
     }
 
     pub fn to_json(&self) -> Value {
@@ -132,6 +158,7 @@ impl Report {
                 "elevated": self.elevated,
                 "uptime_secs": self.uptime_secs,
             },
+            "wmi_cache": self.wmi_stats,
             "modules": modules,
             "errors": errors,
         })
@@ -164,13 +191,21 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
 
     std::fs::write(&temp_path, text)
         .map_err(|err| format!("nie udało się zapisać {}: {err}", temp_path.display()))?;
-    std::fs::rename(&temp_path, path).map_err(|err| {
-        format!(
+    if let Err(err) = std::fs::rename(&temp_path, path) {
+        if let Err(cleanup) = std::fs::remove_file(&temp_path) {
+            tracing::warn!(
+                error = %cleanup,
+                path = %temp_path.display(),
+                "nie udało się usunąć pliku tymczasowego raportu"
+            );
+        }
+        return Err(format!(
             "nie udało się podmienić {} na {}: {err}",
             temp_path.display(),
             path.display()
-        )
-    })
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

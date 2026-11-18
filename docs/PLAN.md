@@ -281,8 +281,8 @@ Moduły: `hw.cpu`, `hw.memory`, `hw.board`, `hw.bios`, `hw.gpu`, `hw.monitor`, `
 
 Zrealizowane:
 
-- 10 modułów w `crates/sk-modules` (jeden plik = jeden moduł), 129 testów jednostkowych i kontraktowych.
-- **Cache WMI** w `sk-win` (`QueryCache`): jedno zapytanie na klasę na odświeżenie, `begin_round()` czyści go przed każdą rundą; statystyki trafień/pudeł są testowane.
+- 10 modułów w `crates/sk-modules` (jeden plik = jeden moduł), 135 testów: jednostkowe, kontraktowe, golden widoków (`hw.cpu`, `hw.memory`) i 3 sprzętowe `#[ignore]`.
+- **Cache WMI** w `sk-win` (`QueryCache`): jedno zapytanie na klasę na odświeżenie, `begin_round()` czyści go przed każdą rundą. Statystyki trafień/pudeł trafiają do raportu (`wmi_cache`); zmierzone na tej maszynie: 16 zapytań, 1 trafienie (`Win32_VideoController` dzielone przez `hw.gpu` i `hw.monitor`) na 10 modułów.
 - **VRAM z rejestru**: `HardwareInformation.qwMemorySize` (potwierdzone: 12 868 124 672 B dla RX 6700 XT, gdy `AdapterRAM` raportuje 4 293 918 720 B). Gdy wpisu brak, moduł pokazuje „≥ 4 GB” i wyjaśnia obcięcie, zamiast podawać fałszywą liczbę.
 - **EDID z rejestru**: własny parser (`crates/sk-modules/src/edid.rs`) daje rozdzielczość natywną, przekątną, rok produkcji i maksymalne odświeżanie (Samsung T19B300: 1366×768, 18,5″; Gigabyte GS27QCA: 2560×1440, 180 Hz).
 - **Tryb firmware** (`GetFirmwareType`) i **pamięć adapterów** — trait `MachineInfo`, makieta `MockMachine`.
@@ -300,6 +300,7 @@ Zrealizowane:
 | rozdzielczość natywna przez `QueryDisplayConfig` | EDID z rejestru + parser w Rust | `QueryDisplayConfig` daje tryb bieżący, nie natywny; EDID jest jedynym wiarygodnym źródłem i dał się przetestować na fixtures |
 | `system.live` jako moduł z własnym samplerem | sampler w wątku roboczym, moduł czyta `LiveSource` | moduł zostaje bezstanowy i testowalny bez zegara |
 | nowy crate `sk-report` | raport w `sk-app` | przy jednym formacie wyjścia osobny crate to zbędna warstwa |
+| tabela bez tłumaczonych komórek | `Table::value_keys` w kontrakcie | kolumna „Wejście” monitora to stan (cyfrowe/analogowe), a nie dana — bez tego mechanizmu proza trafiałaby do kodu (znalezione w recenzji) |
 
 **Akceptacja — potwierdzona:** wszystkie moduły zwracają realne dane na tej maszynie (`report` → 10 modułów, 0 błędów), bateria przechodzi na fixture syntetycznym, raport HTML otwiera się w przeglądarce i zawiera komplet sekcji (zrzuty: `docs/screenshot.png`, `docs/report.png`), testy modułów na mockach zielone, testy `--ignored` przechodzą.
 
@@ -354,7 +355,7 @@ Portable ZIP + instalator (Inno Setup lub NSIS), podpis Authenticode (bez podpis
 |---|---|---|
 | Unit | parsery SMART, liczenie wear/health, agregacja benchmarku, model widoku, i18n | każdy commit, CI |
 | Kontrakt modułów | unikalne `id`, klucze i18n w `pl`+`en`, `collect()` nie panikuje na mocku, widok serializuje się | każdy commit, CI |
-| Golden | `View` i raport JSON/HTML dla fixture'ów (snapshot) | każdy commit, CI |
+| Golden | `View` modułów dla fixture'ów (`tests/golden/*.json`, odświeżanie przez `UPDATE_GOLDEN=1`) | każdy commit, CI |
 | Integracyjne (sprzęt) | realne WMI, SMART, benchmark, migracja — `#[ignore]` | ręcznie, na maszynie serwisowej |
 | UI smoke | `egui_kittest`: okno startuje, lista modułów się rysuje, klik w moduł nie panikuje | CI |
 | Bezpieczeństwo | test, że operacja D bez potwierdzenia jest odrzucana; test, że log nie zawiera sekretów | CI |
@@ -376,7 +377,9 @@ Bramki: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
 | Sterowniki jądra (Faza 5) | wysoki | poza 1.0; jeśli wejdzie — tylko podpisany, udokumentowany, opt‑in |
 | Pliki zapisane przez proces elevated mają ACL administratora — użytkownik ich nie otworzy | średni | zapis przez plik tymczasowy + jawne ACL z katalogu użytkownika; test regresyjny w Fazie 1 |
 | RODO przy danych klienta | średni | offline, minimalizacja, szyfrowanie pakietu, log audytowy, docs dla serwisu |
-| Rozjazd dokumentacji i kodu | średni | MODULE_GUIDE aktualizowany w tym samym PR co kontrakt; test kontraktowy pilnuje reszty |
+| Rozjazd dokumentacji i kodu | średni | MODULE_GUIDE aktualizowany w tym samym PR co kontrakt; test kontraktowy i golden pilnują reszty |
+| Wiele instancji tego samego urządzenia (2 sockety CPU, 2 baterie) | niski | moduły pokazują pierwszą instancję (`decode_first`); monitory i dyski są listami. Rozbudowa, gdy pojawi się taki sprzęt do testów |
+| `MaxCapacity`/`MaxCapacityEx` w SMBIOS bywają w bajtach zamiast KB (stare systemy) | niski | moduł preferuje `MaxCapacityEx` (u64); wartość nietypową widać w raporcie, ale nie jest korygowana heurystyką |
 
 ---
 

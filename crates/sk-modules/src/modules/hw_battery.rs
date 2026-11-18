@@ -274,18 +274,20 @@ fn format_mwh(value: Option<u32>) -> String {
     )
 }
 
-/// Kody `BatteryStaticData.Chemistry` (2 = SLA, 6 = Li-ion, 7 = Li-poly,
-/// 8 = NiMH, 9 = NiCd).
+/// Kody `Chemistry` (SMBIOS typ 22 / `BATTERY_CHEMISTRY_*`): 1 = inne,
+/// 2 = nieznane, 3 = kwasowo-ołowiowe, 4 = NiCd, 5 = NiMH, 6 = Li-ion,
+/// 7 = cynkowo-powietrzne, 8 = Li-poly. Sterowniki potrafią zwrócić śmieci,
+/// więc nieznany kod pokazujemy jako liczbę, nie zgadywany typ.
 fn chemistry_name(code: Option<u32>) -> String {
     match code {
-        Some(2) => "SLA".to_string(),
-        Some(3) => "NiCd".to_string(),
+        Some(3) => "SLA (lead-acid)".to_string(),
+        Some(4) => "NiCd".to_string(),
+        Some(5) => "NiMH".to_string(),
         Some(6) => "Li-ion".to_string(),
-        Some(7) => "Li-poly".to_string(),
-        Some(8) => "NiMH".to_string(),
-        Some(9) => "NiCd".to_string(),
+        Some(7) => "Zinc-air".to_string(),
+        Some(8) => "Li-poly".to_string(),
+        Some(1) | Some(2) | None => "-".to_string(),
         Some(other) => format!("WMI #{other}"),
-        None => "-".to_string(),
     }
 }
 
@@ -373,8 +375,13 @@ mod tests {
 
     #[test]
     fn maps_chemistry_codes() {
+        assert_eq!(chemistry_name(Some(3)), "SLA (lead-acid)");
+        assert_eq!(chemistry_name(Some(4)), "NiCd");
+        assert_eq!(chemistry_name(Some(5)), "NiMH");
         assert_eq!(chemistry_name(Some(6)), "Li-ion");
-        assert_eq!(chemistry_name(Some(7)), "Li-poly");
+        assert_eq!(chemistry_name(Some(7)), "Zinc-air");
+        assert_eq!(chemistry_name(Some(8)), "Li-poly");
+        assert_eq!(chemistry_name(Some(2)), "-");
         assert_eq!(chemistry_name(Some(42)), "WMI #42");
         assert_eq!(chemistry_name(None), "-");
     }

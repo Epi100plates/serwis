@@ -39,10 +39,11 @@ struct MemoryModule {
 
 #[derive(Debug, Default, Deserialize)]
 struct MemoryArray {
+    // Oba pola są w kilobajtach; `MaxCapacityEx` jest 64-bitowe (tablice > 4 TiB).
     #[serde(rename = "MaxCapacity", default)]
-    max_capacity_kib: Option<u32>,
+    max_capacity_kib: Option<u64>,
     #[serde(rename = "MaxCapacityEx", default)]
-    max_capacity_ex_kib: Option<u32>,
+    max_capacity_ex_kib: Option<u64>,
     #[serde(rename = "MemoryDevices", default)]
     slots: Option<u16>,
     #[serde(rename = "MemoryErrorCorrection", default)]
@@ -85,8 +86,9 @@ impl Module for Memory {
         });
 
         let slots_value = match slots_total {
-            Some(total) => format!("{} / {total}", modules.len()),
-            None => modules.len().to_string(),
+            // `MemoryDevices = 0` bywa raportowane przez wadliwy SMBIOS.
+            Some(total) if total > 0 => format!("{} / {total}", modules.len()),
+            _ => modules.len().to_string(),
         };
 
         let mut summary = vec![
@@ -95,20 +97,24 @@ impl Module for Memory {
             KeyValue::new("module.hw_memory.slots", slots_value),
         ];
         if let Some(kib) = max_capacity_kib {
-            let bytes = u64::from(kib) * 1024;
+            let bytes = kib * 1024;
             summary.push(KeyValue::new(
                 "module.hw_memory.max_capacity",
                 format_bytes(bytes),
             ));
         }
         if let Some(code) = array.as_ref().and_then(|array| array.error_correction) {
-            summary.push(KeyValue::new(
-                "module.hw_memory.ecc",
-                error_correction_name(code),
-            ));
+            summary.push(ecc_row(code));
         }
 
         let mut blocks = vec![Block::key_values(summary)];
+
+        if array.is_none() {
+            blocks.push(Block::note(
+                NoteLevel::Warn,
+                "module.hw_memory.note.no_array",
+            ));
+        }
 
         if modules.is_empty() {
             blocks.push(Block::note(
@@ -121,7 +127,7 @@ impl Module for Memory {
                 .map(|module| {
                     vec![
                         slot_name(module).to_string(),
-                        format_bytes(module.capacity.unwrap_or(0)),
+                        capacity_text(module.capacity),
                         format_mhz(module.configured_clock_mhz.or(module.speed_mhz)),
                         text(module.manufacturer.as_deref()),
                         text(module.part_number.as_deref()),
@@ -157,7 +163,7 @@ impl Module for Memory {
             "total_bytes": total_bytes,
             "modules_count": modules.len(),
             "slots_total": slots_total,
-            "max_capacity_bytes": max_capacity_kib.map(|kib| u64::from(kib) * 1024),
+            "max_capacity_bytes": max_capacity_kib.map(|kib| kib * 1024),
             "error_correction": array.as_ref().and_then(|array| array.error_correction),
             "modules": modules.iter().map(|module| serde_json::json!({
                 "slot": crate::util::trimmed(module.device_locator.clone()),
@@ -236,14 +242,22 @@ fn form_factor_name(code: Option<u16>) -> String {
     }
 }
 
-/// Kody `MemoryErrorCorrection`.
-fn error_correction_name(code: u16) -> String {
+/// Pojemność modułu jako tekst; `-` gdy SMBIOS nie podaje rozmiaru.
+fn capacity_text(bytes: Option<u64>) -> String {
+    match bytes {
+        Some(bytes) if bytes > 0 => format_bytes(bytes),
+        _ => "-".to_string(),
+    }
+}
+
+/// Korekcja błędów to stan, więc jedzie kluczem i18n; nieznany kod zostaje daną.
+fn ecc_row(code: u16) -> KeyValue {
     match code {
-        3 => "None".to_string(),
-        4 => "Parity".to_string(),
-        5 => "Single-bit ECC".to_string(),
-        6 => "Multi-bit ECC".to_string(),
-        other => format!("SMBIOS #{other}"),
+        3 => KeyValue::state("module.hw_memory.ecc", "common.value.none"),
+        4 => KeyValue::state("module.hw_memory.ecc", "common.ecc.parity"),
+        5 => KeyValue::state("module.hw_memory.ecc", "common.ecc.single_bit"),
+        6 => KeyValue::state("module.hw_memory.ecc", "common.ecc.multi_bit"),
+        other => KeyValue::new("module.hw_memory.ecc", format!("SMBIOS #{other}")),
     }
 }
 
@@ -325,8 +339,15 @@ mod tests {
         assert_eq!(memory_type_name(None), "-");
         assert_eq!(form_factor_name(Some(8)), "DIMM");
         assert_eq!(form_factor_name(Some(12)), "SODIMM");
-        assert_eq!(error_correction_name(3), "None");
-        assert_eq!(error_correction_name(5), "Single-bit ECC");
+        assert_eq!(ecc_row(3).value_key.as_deref(), Some("common.value.none"));
+        assert_eq!(
+            ecc_row(5).value_key.as_deref(),
+            Some("common.ecc.single_bit")
+        );
+        assert_eq!(ecc_row(99).value, "SMBIOS #99");
+        assert_eq!(capacity_text(None), "-");
+        assert_eq!(capacity_text(Some(0)), "-");
+        assert_eq!(capacity_text(Some(17_179_869_184)), "16.0 GB");
     }
 
     #[test]

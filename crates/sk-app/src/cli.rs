@@ -114,7 +114,8 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         module_filter: args.module.as_deref(),
         app_version: env!("CARGO_PKG_VERSION"),
     };
-    let report = Report::collect(&registry, &ctx, &options);
+    let report =
+        Report::collect(&registry, &ctx, &options).with_wmi_stats(wmi.cache_stats().into());
 
     if let Some(path) = args.json.as_deref() {
         report::write_json(path, &report.to_json())?;
