@@ -63,13 +63,13 @@
               ],
               [
                 null,
-                null,
+                "common.value.unknown",
                 "common.value.unknown",
                 "common.value.unknown"
               ],
               [
                 null,
-                null,
+                "common.value.unknown",
                 "common.value.unknown",
                 "common.value.unknown"
               ],
@@ -166,7 +166,7 @@
             },
             {
               "label_key": "module.storage_smart.nvme.data_read",
-              "value": "0.0 GB"
+              "value": "-"
             },
             {
               "label_key": "module.storage_smart.nvme.data_written",
@@ -229,7 +229,8 @@
             },
             {
               "label_key": "module.storage_smart.drive.bus",
-              "value": "-"
+              "value": "",
+              "value_key": "common.value.unknown"
             },
             {
               "label_key": "module.storage_smart.drive.kind",
@@ -284,7 +285,8 @@
             },
             {
               "label_key": "module.storage_smart.drive.bus",
-              "value": "-"
+              "value": "",
+              "value_key": "common.value.unknown"
             },
             {
               "label_key": "module.storage_smart.drive.kind",
@@ -306,7 +308,7 @@
         {
           "kind": "note",
           "level": "info",
-          "text_key": "module.storage_smart.note.unavailable"
+          "text_key": "module.storage_smart.note.no_media"
         }
       ]
     },

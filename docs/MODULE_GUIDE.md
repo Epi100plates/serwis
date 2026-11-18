@@ -364,7 +364,7 @@ Reguły, których oczekuje review:
 
 - **Brak uprawnień to nie błąd modułu.** `AccessDenied` → `Block::note(NoteLevel::Warn, "…note.elevation")` plus stan „nieznane” w tabeli; `collect()` zwraca `Ok`.
 - **Awaria jednego dysku nie zabiera raportu.** Błąd `smart()` zapisujesz przy konkretnym dysku (dane JSON `error.kind`), a nie jako `Err` całego modułu.
-- **Nie interpretuj surowych liczników bez wiedzy.** Atrybuty 5, 187, 197, 198, 199 mają znaczenie; atrybuty 1 i 7 mają surowe wartości niezerowe także na zdrowym dysku.
+- **Nie interpretuj surowych liczników bez wiedzy.** Znaczenie mają atrybuty z `SUSPICIOUS_ATTRIBUTE_IDS` (5, 10, 184, 187, 188, 196, 197, 198, 199); atrybuty 1 i 7 mają surowe wartości niezerowe także na zdrowym dysku.
 - **Ocena stanu jest jawna** (`Health::Good/Warning/Bad`) i pokazana jako `value_key` (`module.storage_smart.health.*`), nie jako kolor bez wyjaśnienia.
 
 ---

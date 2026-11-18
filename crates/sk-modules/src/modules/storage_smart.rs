@@ -41,6 +41,8 @@ struct DriveReport {
     bus: BusKind,
     kind: DriveKind,
     removable: bool,
+    /// Napęd bez nośnika (czytnik kart, pusta kieszeń) — nie ma czego odpytywać.
+    no_medium: bool,
     protocol: Option<&'static str>,
     health: Option<Health>,
     nvme: Option<NvmeHealth>,
@@ -60,6 +62,7 @@ impl DriveReport {
             bus: BusKind::Unknown,
             kind: DriveKind::Unknown,
             removable: false,
+            no_medium: false,
             protocol: None,
             health: None,
             nvme: None,
@@ -93,7 +96,9 @@ impl DriveReport {
 
     fn written_bytes(&self) -> Option<u64> {
         let nvme = self.nvme.as_ref()?;
-        Some(nvme.data_written_bytes.min(u128::from(u64::MAX)) as u64)
+        // Zero w liczniku NVMe znaczy „nie raportowano”, a nie zero bajtów.
+        (nvme.data_written_bytes > 0)
+            .then(|| nvme.data_written_bytes.min(u128::from(u64::MAX)) as u64)
     }
 }
 
@@ -119,7 +124,12 @@ impl Module for StorageSmart {
 
         if disks.is_empty() {
             return Ok(ModuleOutput {
-                data: serde_json::json!({ "schema_version": 1, "drives": [] }),
+                data: serde_json::json!({
+                    "schema_version": 1,
+                    "elevated": ctx.host.is_elevated(),
+                    "drives": [],
+                    "drives_with_smart": 0,
+                }),
                 view: View::new(vec![
                     Section::new("module.storage_smart.section").with_blocks(vec![Block::note(
                         NoteLevel::Warn,
@@ -133,20 +143,22 @@ impl Module for StorageSmart {
         for disk in &disks {
             let mut report = DriveReport::from_disk(disk);
 
+            // Napęd bez nośnika nie ma czego raportować — nawet deskryptora nie
+            // ma sensu pytać, a IOCTL zwróciłby „urządzenie niegotowe”, co nie
+            // jest błędem SMART.
+            if report.size_bytes.is_none() {
+                report.no_medium = true;
+                report.error = Some(ModuleError::unavailable("brak nośnika"));
+                reports.push(report);
+                continue;
+            }
+
             // Deskryptor daje magistralę i rodzaj nośnika; brak dostępu nie
             // przerywa modułu — pokazujemy wtedy mniej, ale nie zgadujemy.
             if let Ok(drive) = ctx.storage.describe(report.index) {
                 report.bus = drive.bus;
                 report.kind = drive.kind;
                 report.removable = drive.removable;
-            }
-
-            // Czytnik kart bez nośnika nie ma czego raportować; IOCTL zwróciłby
-            // „urządzenie niegotowe”, co nie jest błędem SMART.
-            if report.size_bytes.is_none() {
-                report.error = Some(ModuleError::unavailable("brak nośnika"));
-                reports.push(report);
-                continue;
             }
 
             match ctx.storage.smart(report.index) {
@@ -220,12 +232,12 @@ impl StorageSmart {
         for (row, report) in reports.iter().enumerate() {
             overview = overview.with_value_key(row, 2, kind_key(report.kind));
             overview = overview.with_value_key(row, 3, health_key(report.health));
+            if report.bus == BusKind::Unknown {
+                overview = overview.with_value_key(row, 1, "common.value.unknown");
+            }
         }
 
-        let mut overview_blocks = Vec::new();
-        if !reports.is_empty() {
-            overview_blocks.push(Block::Table { table: overview });
-        }
+        let mut overview_blocks = vec![Block::Table { table: overview }];
         if !elevated {
             overview_blocks.push(Block::note(
                 NoteLevel::Warn,
@@ -253,20 +265,27 @@ impl StorageSmart {
             ));
             let mut blocks = vec![Block::key_values(drive_rows(report))];
 
-            match (&report.error, report.health) {
-                (Some(ModuleError::AccessDenied { .. }), _) => blocks.push(Block::note(
-                    NoteLevel::Error,
-                    "module.storage_smart.note.denied",
-                )),
-                (Some(ModuleError::Unavailable { .. }), _) => blocks.push(Block::note(
+            if report.no_medium {
+                blocks.push(Block::note(
                     NoteLevel::Info,
-                    "module.storage_smart.note.unavailable",
-                )),
-                (Some(_), _) => blocks.push(Block::note(
-                    NoteLevel::Error,
-                    "module.storage_smart.note.failed",
-                )),
-                (None, _) => {}
+                    "module.storage_smart.note.no_media",
+                ));
+            } else {
+                match &report.error {
+                    Some(ModuleError::AccessDenied { .. }) => blocks.push(Block::note(
+                        NoteLevel::Error,
+                        "module.storage_smart.note.denied",
+                    )),
+                    Some(ModuleError::Unavailable { .. }) => blocks.push(Block::note(
+                        NoteLevel::Info,
+                        "module.storage_smart.note.unavailable",
+                    )),
+                    Some(_) => blocks.push(Block::note(
+                        NoteLevel::Error,
+                        "module.storage_smart.note.failed",
+                    )),
+                    None => {}
+                }
             }
 
             if let Some(health) = &report.nvme {
@@ -277,18 +296,22 @@ impl StorageSmart {
             }
 
             if let Some(attributes) = &report.ata {
-                if report.health == Some(Health::Bad) {
-                    if attributes.iter().any(AtaAttribute::threshold_exceeded) {
+                match report.health {
+                    // Przekroczony próg producenta to stan przedawaryjny.
+                    Some(Health::Bad)
+                        if attributes.iter().any(AtaAttribute::threshold_exceeded) =>
+                    {
                         blocks.push(Block::note(
                             NoteLevel::Error,
                             "module.storage_smart.note.threshold_exceeded",
                         ));
-                    } else {
-                        blocks.push(Block::note(
-                            NoteLevel::Warn,
-                            "module.storage_smart.note.counters",
-                        ));
                     }
+                    // Ostrzeżenie przy ATA zawsze pochodzi z niezerowych liczników.
+                    Some(Health::Warning) => blocks.push(Block::note(
+                        NoteLevel::Warn,
+                        "module.storage_smart.note.counters",
+                    )),
+                    _ => {}
                 }
                 blocks.push(Block::Table {
                     table: attribute_table(attributes),
@@ -332,10 +355,7 @@ fn drive_rows(report: &DriveReport) -> Vec<KeyValue> {
             "module.storage_smart.drive.interface",
             report.interface_type.clone(),
         ),
-        KeyValue::new(
-            "module.storage_smart.drive.bus",
-            bus_label(report.bus).to_string(),
-        ),
+        bus_row(report.bus),
         KeyValue::state("module.storage_smart.drive.kind", kind_key(report.kind)),
         KeyValue::state(
             "module.storage_smart.drive.health",
@@ -363,16 +383,7 @@ fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
         ),
         KeyValue::new(
             "module.storage_smart.nvme.sensors",
-            if health.sensors_c.is_empty() {
-                "-".to_string()
-            } else {
-                health
-                    .sensors_c
-                    .iter()
-                    .map(|value| format!("{value} °C"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            },
+            numbered_sensors(&health.sensors_c),
         ),
         KeyValue::new(
             "module.storage_smart.nvme.available_spare",
@@ -388,11 +399,11 @@ fn nvme_rows(health: &NvmeHealth) -> Vec<KeyValue> {
         ),
         KeyValue::new(
             "module.storage_smart.nvme.data_read",
-            format_bytes(health.data_read_bytes.min(u128::from(u64::MAX)) as u64),
+            reported_bytes(health.data_read_bytes),
         ),
         KeyValue::new(
             "module.storage_smart.nvme.data_written",
-            format_bytes(health.data_written_bytes.min(u128::from(u64::MAX)) as u64),
+            reported_bytes(health.data_written_bytes),
         ),
         KeyValue::new(
             "module.storage_smart.nvme.power_on_hours",
@@ -493,6 +504,39 @@ fn bus_label(bus: BusKind) -> &'static str {
     }
 }
 
+/// Wiersz „Magistrala”: znana magistrala to dana, nieznana to stan (klucz i18n).
+fn bus_row(bus: BusKind) -> KeyValue {
+    if bus == BusKind::Unknown {
+        KeyValue::state("module.storage_smart.drive.bus", "common.value.unknown")
+    } else {
+        KeyValue::new("module.storage_smart.drive.bus", bus_label(bus))
+    }
+}
+
+/// Czujniki temperatury z numerami — zero w czujniku to brak pomiaru, ale
+/// numeracja musi zostać, żeby „Czujnik 2” nie udawał „Czujnika 1”.
+fn numbered_sensors(sensors: &[Option<i16>]) -> String {
+    let parts: Vec<String> = sensors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| value.map(|value| format!("{}: {value} °C", index + 1)))
+        .collect();
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// Liczniki NVMe równe zero oznaczają „nie raportowano”, a nie zero bajtów.
+fn reported_bytes(value: u128) -> String {
+    if value == 0 {
+        "-".to_string()
+    } else {
+        format_bytes(value.min(u128::from(u64::MAX)) as u64)
+    }
+}
+
 fn kind_key(kind: DriveKind) -> &'static str {
     match kind {
         DriveKind::Ssd => "common.value.ssd",
@@ -520,13 +564,14 @@ fn health_name(health: Option<Health>) -> Option<&'static str> {
 }
 
 /// Temperatura z atrybutów ATA: 194 (temperatura dysku) albo 190 (przepływ
-/// powietrza). Surowe bajty niskie to stopnie Celsjusza.
+/// powietrza). Surowe bajty niskie to stopnie Celsjusza (ze znakiem); zero
+/// oznacza brak pomiaru, nie 0 °C.
 fn ata_temperature(attributes: &[AtaAttribute]) -> Option<i16> {
     [194u8, 190]
         .iter()
         .find_map(|id| ata_raw(attributes, *id))
-        .map(|raw| (raw & 0xFF) as i16)
-        .filter(|temperature| (1..120).contains(temperature))
+        .map(|raw| i16::from(raw as u8 as i8))
+        .filter(|temperature| *temperature != 0 && (-20..=120).contains(temperature))
 }
 
 fn ata_raw(attributes: &[AtaAttribute], id: u8) -> Option<u64> {
@@ -539,7 +584,11 @@ fn ata_raw(attributes: &[AtaAttribute], id: u8) -> Option<u64> {
 fn drive_json(report: &DriveReport) -> serde_json::Value {
     let error = report.error.as_ref().map(|error| {
         serde_json::json!({
-            "kind": error_kind(error),
+            "kind": if report.no_medium {
+                "no_medium"
+            } else {
+                error_kind(error)
+            },
             "message": error.to_string(),
         })
     });
@@ -554,6 +603,7 @@ fn drive_json(report: &DriveReport) -> serde_json::Value {
         "bus": report.bus,
         "kind": report.kind,
         "removable": report.removable,
+        "no_medium": report.no_medium,
         "protocol": report.protocol,
         "health": health_name(report.health),
         "temperature_c": report.temperature_c(),
@@ -591,6 +641,7 @@ fn nvme_json(health: &NvmeHealth) -> serde_json::Value {
 fn attribute_json(attribute: &AtaAttribute) -> serde_json::Value {
     serde_json::json!({
         "id": attribute.id,
+        "flags": attribute.flags,
         "value": attribute.value,
         "worst": attribute.worst,
         "threshold": attribute.threshold,
@@ -891,22 +942,183 @@ mod tests {
         let mut row = disk_row(3, "Czytnik kart");
         row["Size"] = serde_json::Value::Null;
         let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![row]);
-        // Makieta nie zna tego dysku — IOCTL nie powinien być w ogóle wołany.
+        // Makieta zna ten dysk, więc gdyby moduł pytał o deskryptor, magistrala
+        // byłaby znana (USB). Napęd bez nośnika nie może być odpytywany.
+        let storage = MockStorage::new().with_unavailable(
+            PhysicalDrive::new(3, BusKind::Usb, DriveKind::Unknown),
+            "brak nośnika",
+        );
         let output = StorageSmart
             .collect(
                 &Harness::new()
                     .with_wmi(wmi)
+                    .with_storage(storage)
                     .with_host(sk_core::testing::MockHost::elevated())
                     .ctx(),
             )
             .expect("zbieranie");
-        assert_eq!(output.data["drives"][0]["error"]["kind"], "unavailable");
-        assert!(
-            output.data["drives"][0]["error"]["message"]
-                .as_str()
-                .expect("komunikat")
-                .contains("nośnika")
+
+        assert_eq!(output.data["drives"][0]["error"]["kind"], "no_medium");
+        assert_eq!(output.data["drives"][0]["no_medium"], true);
+        assert_eq!(
+            output.data["drives"][0]["bus"], "unknown",
+            "deskryptor nie powinien być pytany dla pustego napędu"
         );
+        assert!(output.view.uses_key("module.storage_smart.note.no_media"));
+        assert!(
+            !output
+                .view
+                .uses_key("module.storage_smart.note.unavailable")
+        );
+    }
+
+    #[test]
+    fn broken_nvme_page_is_reported_as_failure() {
+        let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![disk_row(0, "NVMe")]);
+        let storage = MockStorage::new().with_nvme(
+            PhysicalDrive::new(0, BusKind::Nvme, DriveKind::Ssd),
+            vec![0u8; 64],
+        );
+        let output = StorageSmart
+            .collect(
+                &Harness::new()
+                    .with_wmi(wmi)
+                    .with_storage(storage)
+                    .with_host(sk_core::testing::MockHost::elevated())
+                    .ctx(),
+            )
+            .expect("uszkodzona strona logu nie może wywalić raportu");
+
+        assert_eq!(output.data["drives"][0]["error"]["kind"], "provider");
+        assert!(output.view.uses_key("module.storage_smart.note.failed"));
+        assert_eq!(output.data["drives"][0]["health"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn nvme_warning_bits_get_translated_notes() {
+        let mut page = nvme_page();
+        page[0] = 0b0011_0001; // zapas bloków, backup pamięci ulotnej, pamięć trwała
+        page[192..196].copy_from_slice(&5u32.to_le_bytes());
+        let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![disk_row(0, "NVMe")]);
+        let storage = MockStorage::new()
+            .with_nvme(PhysicalDrive::new(0, BusKind::Nvme, DriveKind::Ssd), page);
+        let output = StorageSmart
+            .collect(
+                &Harness::new()
+                    .with_wmi(wmi)
+                    .with_storage(storage)
+                    .with_host(sk_core::testing::MockHost::elevated())
+                    .ctx(),
+            )
+            .expect("zbieranie");
+
+        assert_eq!(output.data["drives"][0]["health"], "warning");
+        for key in [
+            "module.storage_smart.health.warning",
+            "module.storage_smart.warn.spare",
+            "module.storage_smart.warn.volatile_backup",
+            "module.storage_smart.warn.persistent_read_only",
+            "module.storage_smart.nvme.temperature_time",
+        ] {
+            assert!(output.view.uses_key(key), "brak notki {key}");
+        }
+    }
+
+    #[test]
+    fn ata_counter_warning_explains_itself() {
+        let (mut attributes, mut thresholds) = ata_sectors();
+        // Atrybut 197 (sektory oczekujące) z surową wartością 3, próg nieprzekroczony.
+        let entry = 2 + 4 * 12;
+        attributes[entry] = 197;
+        attributes[entry + 3] = 100;
+        attributes[entry + 4] = 100;
+        attributes[entry + 5..entry + 11].copy_from_slice(&3u64.to_le_bytes()[..6]);
+        thresholds[entry] = 197;
+        thresholds[entry + 1] = 1;
+
+        let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![disk_row(1, "SSD")]);
+        let storage = MockStorage::new().with_ata(
+            PhysicalDrive::new(1, BusKind::Sata, DriveKind::Ssd),
+            attributes,
+            thresholds,
+        );
+        let output = StorageSmart
+            .collect(
+                &Harness::new()
+                    .with_wmi(wmi)
+                    .with_storage(storage)
+                    .with_host(sk_core::testing::MockHost::elevated())
+                    .ctx(),
+            )
+            .expect("zbieranie");
+
+        assert_eq!(output.data["drives"][0]["health"], "warning");
+        assert!(output.view.uses_key("module.storage_smart.note.counters"));
+        assert!(output.view.uses_key("module.storage_smart.health.warning"));
+    }
+
+    #[test]
+    fn nvme_zero_counters_show_as_missing() {
+        let mut page = vec![0u8; smart::SECTOR];
+        page[1..3].copy_from_slice(&314u16.to_le_bytes());
+        page[3] = 100;
+        page[4] = 10;
+        page[128..144].copy_from_slice(&10u128.to_le_bytes());
+
+        let wmi = MockWmi::new().with_rows("Win32_DiskDrive", vec![disk_row(0, "NVMe")]);
+        let storage = MockStorage::new()
+            .with_nvme(PhysicalDrive::new(0, BusKind::Nvme, DriveKind::Ssd), page);
+        let output = StorageSmart
+            .collect(
+                &Harness::new()
+                    .with_wmi(wmi)
+                    .with_storage(storage)
+                    .with_host(sk_core::testing::MockHost::elevated())
+                    .ctx(),
+            )
+            .expect("zbieranie");
+
+        let table = table_at(&output.view, 0);
+        assert_eq!(
+            table.rows[0][6], "-",
+            "zero w liczniku NVMe to brak pomiaru, nie 0,0 GB"
+        );
+        let written = output
+            .view
+            .sections
+            .iter()
+            .flat_map(|section| &section.blocks)
+            .find_map(|block| match block {
+                Block::KeyValues { rows } => rows
+                    .iter()
+                    .find(|row| row.label_key == "module.storage_smart.nvme.data_written"),
+                _ => None,
+            })
+            .expect("wiersz zapisanych danych");
+        assert_eq!(written.value, "-");
+    }
+
+    #[test]
+    fn ata_temperature_accepts_negative_values() {
+        let attributes = [AtaAttribute {
+            id: 194,
+            flags: 0,
+            value: 70,
+            worst: 70,
+            threshold: 0,
+            raw: 251, // 0xFB = -5 °C
+        }];
+        assert_eq!(ata_temperature(&attributes), Some(-5));
+
+        let missing = [AtaAttribute {
+            id: 194,
+            flags: 0,
+            value: 70,
+            worst: 70,
+            threshold: 0,
+            raw: 0,
+        }];
+        assert_eq!(ata_temperature(&missing), None, "zero to brak pomiaru");
     }
 
     #[test]
@@ -916,6 +1128,10 @@ mod tests {
             .collect(&Harness::new().with_wmi(wmi).ctx())
             .expect("pusta lista to nie błąd");
         assert!(output.view.uses_key("module.storage_smart.note.none"));
+        // Kształt danych musi być ten sam co przy niepustej liście.
+        assert_eq!(output.data["drives_with_smart"], 0);
+        assert_eq!(output.data["elevated"], false);
+        assert!(output.data["drives"].as_array().is_some_and(Vec::is_empty));
     }
 
     #[test]

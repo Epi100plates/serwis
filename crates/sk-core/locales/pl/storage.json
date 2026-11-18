@@ -1,6 +1,6 @@
 {
   "module.storage_smart.name": "Stan dysków (SMART)",
-  "module.storage_smart.desc": "Zdrowie dysków NVMe i ATA/SATA: temperatura, zużycie, przepracowane godziny i atrybuty SMART z oceną stanu.",
+  "module.storage_smart.desc": "Zdrowie dysków NVMe i ATA/SATA: temperatura, zużycie, przepracowane godziny i atrybuty SMART z oceną stanu. Odczyt wymaga administratora (uchwyt do dysku fizycznego).",
   "module.storage_smart.section": "Przegląd dysków",
   "module.storage_smart.section.drive": "Szczegóły dysku",
   "module.storage_smart.col.drive": "Dysk",
@@ -55,7 +55,8 @@
   "module.storage_smart.note.unavailable": "Ten dysk nie udostępnia SMART przez swoją magistralę ani kontroler.",
   "module.storage_smart.note.failed": "Odczyt SMART nie powiódł się — szczegóły w raporcie JSON.",
   "module.storage_smart.note.none": "System nie zgłasza żadnego dysku fizycznego.",
+  "module.storage_smart.note.no_media": "Napęd nie ma włożonego nośnika — nie ma czego odczytać.",
   "module.storage_smart.note.bridge": "Dyski za mostkiem USB lub kontrolerem RAID często nie przekazują SMART — to ograniczenie sprzętu, nie błąd programu.",
   "module.storage_smart.note.threshold_exceeded": "Co najmniej jeden atrybut przekroczył próg producenta — to stan przedawaryjny.",
-  "module.storage_smart.note.counters": "Surowe liczniki błędów są niezerowe — sprawdź atrybuty 5, 187, 197, 198 i 199."
+  "module.storage_smart.note.counters": "Surowe liczniki błędów są niezerowe — sprawdź atrybuty 5, 10, 184, 187, 188, 196, 197, 198 i 199."
 }

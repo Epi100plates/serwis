@@ -8,8 +8,7 @@ use sk_core::prelude::*;
 
 use crate::util::{decode_all, format_bytes, number, text};
 
-const DISK_QUERY: &str = "SELECT Index, Model, InterfaceType, MediaType, Size, BytesPerSector, \
-     FirmwareRevision, SerialNumber, Partitions, Status, PNPDeviceID FROM Win32_DiskDrive";
+const DISK_QUERY: &str = queries::WIN32_DISK_DRIVE;
 
 #[derive(Debug, Default, Deserialize)]
 struct DiskDrive {

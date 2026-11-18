@@ -1,6 +1,6 @@
 {
   "module.storage_smart.name": "Drive health (SMART)",
-  "module.storage_smart.desc": "NVMe and ATA/SATA drive health: temperature, wear, power-on hours and SMART attributes with a health verdict.",
+  "module.storage_smart.desc": "NVMe and ATA/SATA drive health: temperature, wear, power-on hours and SMART attributes with a health verdict. Reading requires administrator rights (physical drive handle).",
   "module.storage_smart.section": "Drive overview",
   "module.storage_smart.section.drive": "Drive details",
   "module.storage_smart.col.drive": "Drive",
@@ -55,7 +55,8 @@
   "module.storage_smart.note.unavailable": "This drive does not expose SMART through its bus or controller.",
   "module.storage_smart.note.failed": "Reading SMART failed — details are in the JSON report.",
   "module.storage_smart.note.none": "The system reports no physical drives.",
+  "module.storage_smart.note.no_media": "The drive has no media inserted — there is nothing to read.",
   "module.storage_smart.note.bridge": "Drives behind a USB bridge or RAID controller often do not pass SMART through — that is a hardware limitation, not a program error.",
   "module.storage_smart.note.threshold_exceeded": "At least one attribute exceeded its vendor threshold — this is a pre-failure state.",
-  "module.storage_smart.note.counters": "Raw error counters are non-zero — check attributes 5, 187, 197, 198 and 199."
+  "module.storage_smart.note.counters": "Raw error counters are non-zero — check attributes 5, 10, 184, 187, 188, 196, 197, 198 and 199."
 }

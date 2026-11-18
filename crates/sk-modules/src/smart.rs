@@ -17,6 +17,11 @@ pub const KNOWN_ATTRIBUTE_IDS: &[u8] = &[
     222, 223, 224, 225, 226, 230, 231, 232, 233, 234, 235, 240, 241, 242, 250, 251,
 ];
 
+/// Atrybuty, których niezerowa wartość surowa oznacza realny problem: przealokowane
+/// sektory, ponowienia rozruchu, błędy end-to-end, niekorygowalne błędy, przekroczenia
+/// czasu polecenia, zdarzenia realokacji, sektory oczekujące/offline i błędy CRC transmisji.
+pub const SUSPICIOUS_ATTRIBUTE_IDS: &[u8] = &[5, 10, 184, 187, 188, 196, 197, 198, 199];
+
 /// Błąd parsowania danych SMART — zawsze z powodem, bo „nie działa” nic nie mówi.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmartParseError {
@@ -72,8 +77,8 @@ pub struct NvmeHealth {
     pub error_log_entries: u64,
     pub warning_temp_minutes: u32,
     pub critical_temp_minutes: u32,
-    /// Czujniki 1–8 w °C (bez zera, które znaczy „brak czujnika”).
-    pub sensors_c: Vec<i16>,
+    /// Czujniki 1–8 w °C; `None` to brak pomiaru (kontroler zwrócił zero).
+    pub sensors_c: Vec<Option<i16>>,
 }
 
 impl NvmeHealth {
@@ -159,7 +164,7 @@ pub fn parse_nvme_health(data: &[u8]) -> Result<NvmeHealth, SmartParseError> {
     let temperature_kelvin = u16::from_le_bytes([data[1], data[2]]);
     let sensors_c = (200..216)
         .step_by(2)
-        .filter_map(|offset| {
+        .map(|offset| {
             let kelvin = u16::from_le_bytes([data[offset], data[offset + 1]]);
             kelvin_to_celsius(kelvin)
         })
@@ -188,12 +193,14 @@ pub fn parse_nvme_health(data: &[u8]) -> Result<NvmeHealth, SmartParseError> {
 
 /// Ocena stanu dysku NVMe na podstawie logu zdrowia.
 ///
-/// `Bad` = kontroler zgłasza degradację albo nośnik jest tylko do odczytu.
-/// `Warning` = zapas bloków pod progiem, temperatura, błędy medium, zużycie
-/// od 80 % (przy 100 % traktujemy kość jako wyeksploatowaną).
+/// `Bad` = kontroler zgłasza degradację niezawodności albo nośnik jest tylko do
+/// odczytu. `Warning` = zapas bloków pod progiem, temperatura, błędy medium,
+/// zużycie od 80 %. Zużycie 100 % to **wyczerpany zapas projektowy**, nie awaria:
+/// specyfikacja NVMe pozwala przekroczyć 100 i dysk może nadal pracować, więc
+/// taki stan pozostaje ostrzeżeniem.
 pub fn nvme_health(health: &NvmeHealth) -> Health {
     let reliability_lost = health.critical_warning & 0b0000_1100 != 0;
-    if reliability_lost || health.percentage_used >= 100 {
+    if reliability_lost {
         return Health::Bad;
     }
     if health.critical_warning != 0
@@ -298,21 +305,9 @@ pub fn ata_health(attributes: &[AtaAttribute]) -> Health {
         return Health::Bad;
     }
 
-    let suspicious = attributes.iter().any(|attribute| {
-        attribute.raw > 0
-            && matches!(
-                attribute.id,
-                5   // przealokowane sektory
-                | 10 // ponowne próby rozruchu
-                | 184 // błędy end-to-end
-                | 187 // zgłoszone błędy niekorygowalne
-                | 188 // przekroczenia czasu polecenia
-                | 196 // zdarzenia realokacji
-                | 197 // sektory oczekujące
-                | 198 // sektory niekorygowalne offline
-                | 199 // błędy CRC transmisji
-            )
-    });
+    let suspicious = attributes
+        .iter()
+        .any(|attribute| attribute.raw > 0 && SUSPICIOUS_ATTRIBUTE_IDS.contains(&attribute.id));
 
     if suspicious {
         Health::Warning
@@ -362,8 +357,11 @@ mod tests {
         assert_eq!(health.unsafe_shutdowns, 7);
         // 2 000 000 jednostek × 1000 × 512 B = ~1,02 TB
         assert_eq!(health.data_written_bytes, 2_000_000u128 * 1000 * 512);
-        // Zero w czujniku to brak pomiaru, nie 0 °C.
-        assert_eq!(health.sensors_c, vec![38]);
+        // Zero w czujniku to brak pomiaru, nie 0 °C — numeracja zostaje.
+        assert_eq!(
+            health.sensors_c,
+            vec![Some(38), None, None, None, None, None, None, None]
+        );
         assert_eq!(nvme_health(&health), Health::Good);
     }
 
@@ -417,14 +415,18 @@ mod tests {
             Health::Warning
         );
 
-        assert_eq!(
-            nvme_health(&parse_nvme_health(&nvme_page(0, 300, 80, 0)).expect("strona")),
-            Health::Warning
-        );
-        assert_eq!(
-            nvme_health(&parse_nvme_health(&nvme_page(0, 300, 100, 0)).expect("strona")),
-            Health::Bad
-        );
+        for used in [79u8, 80, 99, 100, 254, 255] {
+            let expected = if used >= 80 {
+                Health::Warning
+            } else {
+                Health::Good
+            };
+            assert_eq!(
+                nvme_health(&parse_nvme_health(&nvme_page(0, 300, used, 0)).expect("strona")),
+                expected,
+                "zużycie {used} %"
+            );
+        }
     }
 
     #[test]
@@ -476,6 +478,7 @@ mod tests {
         assert_eq!(parsed[1].threshold, 0, "atrybut bez progu");
         assert_eq!(parsed[0].threshold, 10);
         assert_eq!(parsed[2].value, 70);
+        assert_eq!(parsed[2].worst, 50);
         assert_eq!(parsed[2].raw, 38);
         assert_eq!(ata_health(&parsed), Health::Good);
     }
@@ -491,9 +494,9 @@ mod tests {
 
     #[test]
     fn ata_health_warns_on_reallocated_and_pending_sectors() {
-        for id in [5u8, 187, 196, 197, 198, 199] {
-            let attributes = ata_sector(&[(id, 100, 100, 2)]);
-            let parsed = parse_ata_attributes(&attributes, &thresholds_sector(&[(id, 1)]))
+        for id in SUSPICIOUS_ATTRIBUTE_IDS {
+            let attributes = ata_sector(&[(*id, 100, 100, 2)]);
+            let parsed = parse_ata_attributes(&attributes, &thresholds_sector(&[(*id, 1)]))
                 .expect("atrybuty");
             assert_eq!(ata_health(&parsed), Health::Warning, "atrybut {id}");
         }
@@ -521,5 +524,15 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), KNOWN_ATTRIBUTE_IDS.len());
+    }
+
+    #[test]
+    fn suspicious_attributes_are_all_known_by_name() {
+        for id in SUSPICIOUS_ATTRIBUTE_IDS {
+            assert!(
+                KNOWN_ATTRIBUTE_IDS.contains(id),
+                "atrybut {id} ma regułę, ale nie ma nazwy"
+            );
+        }
     }
 }

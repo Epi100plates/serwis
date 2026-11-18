@@ -54,8 +54,11 @@ const IOCTL_TIMEOUT_SECS: u32 = 5;
 /// Offset `AdditionalParameters` w `STORAGE_PROPERTY_QUERY` — tam zaczyna się
 /// `STORAGE_PROTOCOL_SPECIFIC_DATA` dla zapytań NVMe.
 const QUERY_PARAMS_OFFSET: usize = offset_of!(STORAGE_PROPERTY_QUERY, AdditionalParameters);
+/// Bufor na zapytanie NVMe: deskryptor zapytania + struktura protokołu + 8 B
+/// zapasu na sterowniki liczące `ProtocolDataOffset` od początku deskryptora
+/// (a nie od `ProtocolSpecificData`) + strona logu.
 const NVME_BUFFER_LEN: usize =
-    QUERY_PARAMS_OFFSET + size_of::<STORAGE_PROTOCOL_SPECIFIC_DATA>() + NVME_HEALTH_LEN;
+    QUERY_PARAMS_OFFSET + size_of::<STORAGE_PROTOCOL_SPECIFIC_DATA>() + 8 + NVME_HEALTH_LEN;
 
 /// Kody błędów Win32 w postaci, w jakiej zwraca je `windows-rs`:
 /// `HRESULT_FROM_WIN32(kod)`. Sprawdzamy je, żeby odróżnić brak uprawnień
@@ -64,7 +67,6 @@ const HRESULT_ACCESS_DENIED: u32 = 0x8007_0005;
 const HRESULT_INVALID_FUNCTION: u32 = 0x8007_0001;
 const HRESULT_NOT_READY: u32 = 0x8007_0015;
 const HRESULT_NOT_SUPPORTED: u32 = 0x8007_0032;
-const HRESULT_INVALID_PARAMETER: u32 = 0x8007_0057;
 const HRESULT_IO_DEVICE: u32 = 0x8007_045D;
 
 /// Bufor wyrównany do 8 B: `DeviceIoControl` dostaje wskaźniki na struktury
@@ -304,7 +306,11 @@ impl DeviceHandle {
             attributes = self.ata_smart_read(ATA_SMART_READ_DATA);
         }
         let attributes = attributes?;
-        let thresholds = self.ata_smart_read(ATA_SMART_READ_THRESHOLDS)?;
+        // Progi bywają odrzucane nawet tam, gdzie atrybuty działają; brak progów
+        // nie może wyrzucić posiadanych już atrybutów (parser podstawi 0).
+        let thresholds = self
+            .ata_smart_read(ATA_SMART_READ_THRESHOLDS)
+            .unwrap_or_default();
         Ok(SmartData::Ata {
             attributes,
             thresholds,
@@ -412,7 +418,9 @@ impl DeviceHandle {
                 ),
             ));
         }
-        if output.status.ide_error & ATA_STATUS_ERR != 0 {
+        // `bIDEError` to rejestr błędu ATA (bit 0 = AMNF, 0x04 = ABRT), a nie
+        // rejestr statusu — odrzucone polecenie ma tu po prostu niezerową wartość.
+        if output.status.ide_error != 0 {
             return Err(ModuleError::unavailable(format!(
                 "SMART_RCV_DRIVE_DATA: dysk odrzucił polecenie (błąd IDE {:#04x})",
                 output.status.ide_error
@@ -585,17 +593,17 @@ fn map_hresult(code: u32, context: &str) -> ModuleError {
         HRESULT_ACCESS_DENIED => {
             ModuleError::access_denied(format!("{context} (wymaga administratora)"))
         }
-        HRESULT_INVALID_FUNCTION | HRESULT_NOT_SUPPORTED | HRESULT_INVALID_PARAMETER => {
-            ModuleError::unavailable(format!(
-                "{context}: kontroler lub mostek nie obsługuje tego polecenia"
-            ))
-        }
+        HRESULT_INVALID_FUNCTION | HRESULT_NOT_SUPPORTED => ModuleError::unavailable(format!(
+            "{context}: kontroler lub mostek nie obsługuje tego polecenia"
+        )),
         HRESULT_NOT_READY => {
             ModuleError::unavailable(format!("{context}: urządzenie nie jest gotowe"))
         }
         HRESULT_IO_DEVICE => ModuleError::unavailable(format!(
             "{context}: sterownik zgłosił błąd wejścia/wyjścia urządzenia"
         )),
+        // Zły parametr oznacza błąd w naszym żądaniu (rozmiar, flagi), a nie
+        // brak wsparcia — taki błąd ma być widoczny jako błąd programu.
         code => ModuleError::provider("DeviceIoControl", format!("{context}: {code:#010x}")),
     }
 }
@@ -639,7 +647,6 @@ mod tests {
         for code in [
             HRESULT_INVALID_FUNCTION,
             HRESULT_NOT_SUPPORTED,
-            HRESULT_INVALID_PARAMETER,
             HRESULT_NOT_READY,
             HRESULT_IO_DEVICE,
         ] {
@@ -653,6 +660,31 @@ mod tests {
         let error = map_hresult(0x8007_001F, "log zdrowia NVMe");
         assert!(matches!(error, ModuleError::Provider { .. }), "{error}");
         assert!(error.to_string().contains("0x8007001f"), "{error}");
+    }
+
+    #[test]
+    fn invalid_parameter_is_a_program_error_not_missing_support() {
+        // Zły rozmiar bufora zgłoszony przez sterownik to nasz błąd, nie
+        // „kontroler nie obsługuje SMART” — nie może zniknąć w degradacji.
+        let error = map_hresult(0x8007_0057, "IOCTL_ATA_PASS_THROUGH");
+        assert!(matches!(error, ModuleError::Provider { .. }), "{error}");
+    }
+
+    /// Rozmiary i wyrównania muszą zgadzać się z ABI Windows; te liczby to
+    /// kontrakt ze strukturami z `ntddscsi.h`/`winioctl.h` i `windows-0.62.2`.
+    #[test]
+    fn ffi_layout_matches_windows_abi() {
+        assert_eq!(size_of::<ATA_PASS_THROUGH_EX>(), 48);
+        assert_eq!(std::mem::align_of::<ATA_PASS_THROUGH_EX>(), 8);
+        // W C struktura ma 9 B; Rust dokłada padding do 12 B, co jest bezpieczne
+        // jako rozmiar wejściowy (sterownik czyta tylko znane pola).
+        assert_eq!(size_of::<STORAGE_PROPERTY_QUERY>(), 12);
+        assert_eq!(offset_of!(STORAGE_PROPERTY_QUERY, AdditionalParameters), 8);
+        assert_eq!(size_of::<STORAGE_PROTOCOL_SPECIFIC_DATA>(), 40);
+        assert_eq!(size_of::<STORAGE_PROTOCOL_DATA_DESCRIPTOR>(), 48);
+        assert_eq!(size_of::<SendCmdInParams>(), 544);
+        assert_eq!(size_of::<SendCmdOutParams>(), 528);
+        assert_eq!(NVME_BUFFER_LEN, 568);
     }
 
     #[test]
