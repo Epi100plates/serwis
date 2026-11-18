@@ -12,5 +12,8 @@
   "module.system_info.host.ram_total": "Pamięć RAM",
   "module.system_info.host.uptime": "Czas działania",
   "module.system_info.host.local_time": "Czas lokalny",
+  "module.system_info.host.system_type": "Typ komputera",
+  "module.system_info.host.hypervisor": "Hypervisor obecny",
+  "module.system_info.note.hypervisor": "Obecny hypervisor oznacza włączone Hyper-V lub izolację rdzeniową — niekoniecznie maszynę wirtualną.",
   "module.system_info.privileges": "Uprawnienia procesu"
 }

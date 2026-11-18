@@ -1,0 +1,17 @@
+[
+  {
+    "Active": true,
+    "Caption": "Battery Status",
+    "Charging": false,
+    "Critical": false,
+    "Description": "Battery Status",
+    "Discharging": false,
+    "InstanceName": "ACPI\\PNP0C0A\\1_0",
+    "Name": "Battery Status",
+    "PowerOnline": true,
+    "Rate": 0,
+    "RemainingCapacity": 39000,
+    "Status": null,
+    "Voltage": 11800
+  }
+]

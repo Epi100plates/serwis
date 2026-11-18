@@ -1,0 +1,32 @@
+[
+    {
+        "Caption":  "Tablica pamięci fizycznej",
+        "Description":  "Tablica pamięci fizycznej",
+        "InstallDate":  null,
+        "Name":  "Tablica pamięci fizycznej",
+        "Status":  null,
+        "CreationClassName":  "Win32_PhysicalMemoryArray",
+        "Manufacturer":  null,
+        "Model":  null,
+        "OtherIdentifyingInfo":  null,
+        "PartNumber":  null,
+        "PoweredOn":  null,
+        "SerialNumber":  "SN-REDACTED",
+        "SKU":  null,
+        "Tag":  "Physical Memory Array 0",
+        "Version":  null,
+        "Depth":  null,
+        "Height":  null,
+        "HotSwappable":  null,
+        "Removable":  null,
+        "Replaceable":  null,
+        "Weight":  null,
+        "Width":  null,
+        "Location":  3,
+        "MaxCapacity":  134217728,
+        "MaxCapacityEx":  134217728,
+        "MemoryDevices":  2,
+        "MemoryErrorCorrection":  3,
+        "Use":  3
+    }
+]

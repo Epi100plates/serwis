@@ -275,16 +275,33 @@ Zrealizowane:
 
 **Akceptacja — potwierdzona:** okno GUI pokazuje realne dane z tej maszyny (zrzut: `docs/screenshot.png`), `serwiskit report --json out.json` tworzy poprawny raport JSON (2 973 B, 1 moduł, 0 błędów), CI gotowe do uruchomienia po pushu.
 
-### Faza 1 — Telemetria (AIDA‑lite) (3–5 dni)
+### Faza 1 — Telemetria (AIDA‑lite) (3–5 dni) — ✅ wykonane (2026‑11‑18)
 
 Moduły: `hw.cpu`, `hw.memory`, `hw.board`, `hw.bios`, `hw.gpu`, `hw.monitor`, `hw.battery`, `hw.disk_inventory`, `system.info` (rozszerzony), `system.live` (wykresy CPU/RAM).
 
-- Cache zapytań WMI (jedno zapytanie na klasę na odświeżenie, nie na moduł).
-- Wykresy live: sampler 1 s w wątku roboczym, bufor pierścieniowy, `request_repaint` z throttle.
-- Raport JSON + HTML (szablon `askama`), eksport z GUI.
-- Fixtures WMI z tej maszyny + fixtures baterii z laptopa (do zebrania; do tego czasu mock syntetyczny).
+Zrealizowane:
 
-**Akceptacja:** wszystkie moduły zwracają realne dane na maszynie testowej; bateria przechodzi na fixture; raport HTML otwiera się i zawiera komplet sekcji; testy modułów na mockach zielone; `--ignored` testy sprzętowe przechodzą na tej maszynie.
+- 10 modułów w `crates/sk-modules` (jeden plik = jeden moduł), 129 testów jednostkowych i kontraktowych.
+- **Cache WMI** w `sk-win` (`QueryCache`): jedno zapytanie na klasę na odświeżenie, `begin_round()` czyści go przed każdą rundą; statystyki trafień/pudeł są testowane.
+- **VRAM z rejestru**: `HardwareInformation.qwMemorySize` (potwierdzone: 12 868 124 672 B dla RX 6700 XT, gdy `AdapterRAM` raportuje 4 293 918 720 B). Gdy wpisu brak, moduł pokazuje „≥ 4 GB” i wyjaśnia obcięcie, zamiast podawać fałszywą liczbę.
+- **EDID z rejestru**: własny parser (`crates/sk-modules/src/edid.rs`) daje rozdzielczość natywną, przekątną, rok produkcji i maksymalne odświeżanie (Samsung T19B300: 1366×768, 18,5″; Gigabyte GS27QCA: 2560×1440, 180 Hz).
+- **Tryb firmware** (`GetFirmwareType`) i **pamięć adapterów** — trait `MachineInfo`, makieta `MockMachine`.
+- **Wykresy live**: `Block::Chart`, `LiveSource` w kontekście, próbkowanie 1 s w wątku roboczym (25 próbek/25 s zmierzone w GUI), bufor pierścieniowy 600 próbek, `egui_plot` 0.38.
+- **Raport JSON + HTML** z jednego przebiegu zbierania. HTML powstaje z tego samego modelu `View` co GUI (bez `askama`, bez JS), wykresy jako inline SVG, wszystkie wartości escapowane.
+- **Fixtures WMI** z tej maszyny (`docs/fixtures/wmi/`, 17 klas) + `tools/collect-wmi-fixtures.ps1` z anonimizacją; fixtures EDID (`docs/fixtures/edid/`); bateria laptopa na syntetycznym fixture (potwierdzone, oznaczone w README).
+- **Testy sprzętowe** `#[ignore]`: `cargo test -p sk-modules --test hardware -- --ignored` — 3 testy przechodzą na maszynie testowej (Ryzen 5 5600, RX 6700 XT, 4 dyski, 2 monitory).
+
+**Odstępstwa od planu (świadome):**
+
+| Plan | Rzeczywistość | Powód |
+|---|---|---|
+| raport HTML przez `askama` | renderer HTML nad modelem `View` w `sk-app/src/html.rs` | szablony per moduł łamałyby zasadę „moduł nie zna UI” i dublowały wiedzę; jeden renderer = JSON i HTML zawsze spójne, zero nowych zależności |
+| bateria przez `IOCTL_BATTERY_QUERY_INFORMATION` | tylko klasy WMI (`BatteryStaticData`, `BatteryFullChargedCapacity`, `BatteryStatus`) | brak laptopa do weryfikacji IOCTL; kod nieprzetestowany na sprzęcie nie wchodzi. Liczba cykli i tak wymaga IOCTL — moduł mówi o tym wprost |
+| rozdzielczość natywna przez `QueryDisplayConfig` | EDID z rejestru + parser w Rust | `QueryDisplayConfig` daje tryb bieżący, nie natywny; EDID jest jedynym wiarygodnym źródłem i dał się przetestować na fixtures |
+| `system.live` jako moduł z własnym samplerem | sampler w wątku roboczym, moduł czyta `LiveSource` | moduł zostaje bezstanowy i testowalny bez zegara |
+| nowy crate `sk-report` | raport w `sk-app` | przy jednym formacie wyjścia osobny crate to zbędna warstwa |
+
+**Akceptacja — potwierdzona:** wszystkie moduły zwracają realne dane na tej maszynie (`report` → 10 modułów, 0 błędów), bateria przechodzi na fixture syntetycznym, raport HTML otwiera się w przeglądarce i zawiera komplet sekcji (zrzuty: `docs/screenshot.png`, `docs/report.png`), testy modułów na mockach zielone, testy `--ignored` przechodzą.
 
 ### Faza 2 — Dyski: SMART i benchmarki (4–7 dni)
 

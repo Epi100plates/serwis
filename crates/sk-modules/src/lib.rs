@@ -4,7 +4,23 @@
 //! `src/modules/mod.rs`: jedna linia `mod`, jedna linia `registry.add::<...>()`.
 //! Instrukcja i checklista: `docs/MODULE_GUIDE.md`.
 
+/// Wczytuje fixture odpowiedzi WMI z `docs/fixtures/wmi/` jako wiersze JSON.
+/// Fixtures to prawdziwe odpowiedzi z maszyny serwisowej (po anonimizacji).
+#[cfg(test)]
+macro_rules! fixture_rows {
+    ($name:literal) => {
+        serde_json::from_str::<Vec<serde_json::Value>>(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/fixtures/wmi/",
+            $name
+        )))
+        .expect("fixture WMI musi być poprawnym JSON-em")
+    };
+}
+
+mod edid;
 mod modules;
+mod util;
 
 use sk_core::registry::ModuleRegistry;
 

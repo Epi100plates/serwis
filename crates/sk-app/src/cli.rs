@@ -3,11 +3,11 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use sk_core::i18n::Locale;
+use sk_core::i18n::{Locale, Translator};
 use sk_core::module::CollectCtx;
-use sk_win::{SystemClock, WinHostEnv, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinWmi};
 
-use crate::report::{self, ReportOptions};
+use crate::report::{self, Report, ReportOptions};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,7 +23,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Zbiera dane modułów i zapisuje raport JSON (tryb bez GUI).
+    /// Zbiera dane modułów i zapisuje raport JSON i/lub HTML (tryb bez GUI).
     Report(ReportArgs),
 }
 
@@ -31,7 +31,11 @@ enum Command {
 struct ReportArgs {
     /// Ścieżka pliku wynikowego JSON.
     #[arg(long, value_name = "PLIK")]
-    json: PathBuf,
+    json: Option<PathBuf>,
+
+    /// Ścieżka pliku wynikowego HTML (do wydruku lub wysłania klientowi).
+    #[arg(long, value_name = "PLIK")]
+    html: Option<PathBuf>,
 
     /// Tylko jeden moduł, np. `system.info`.
     #[arg(long, value_name = "ID")]
@@ -67,6 +71,12 @@ pub fn run() -> Result<(), String> {
 }
 
 fn run_report(args: ReportArgs) -> Result<(), String> {
+    if args.json.is_none() && args.html.is_none() {
+        return Err(
+            "podaj przynajmniej jedno wyjście: --json <PLIK> lub --html <PLIK>".to_string(),
+        );
+    }
+
     let registry = sk_modules::registry();
 
     if let Some(filter) = args.module.as_deref()
@@ -83,38 +93,54 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         ));
     }
 
+    let locale: Locale = args.locale.into();
     let wmi = WinWmi::new();
     let clock = SystemClock::new();
     let host = WinHostEnv::new();
+    let machine = WinMachine::new();
+    let live = sk_core::live::LiveHistory::new(1);
+    wmi.begin_round();
+
     let ctx = CollectCtx {
         wmi: &wmi,
         clock: &clock,
         host: &host,
-        locale: args.locale.into(),
+        machine: &machine,
+        live: &live,
+        locale,
     };
 
     let options = ReportOptions {
         module_filter: args.module.as_deref(),
         app_version: env!("CARGO_PKG_VERSION"),
     };
-    let report = report::build(&registry, &ctx, &options);
-    report::write_json(&args.json, &report)?;
+    let report = Report::collect(&registry, &ctx, &options);
 
-    let module_count = report["modules"].as_array().map_or(0, Vec::len);
-    let error_count = report["errors"].as_array().map_or(0, Vec::len);
+    if let Some(path) = args.json.as_deref() {
+        report::write_json(path, &report.to_json())?;
+    }
+    if let Some(path) = args.html.as_deref() {
+        let mut translator = Translator::load().map_err(|err| format!("tłumaczenia: {err}"))?;
+        translator.set_locale(locale);
+        report::write_html(path, &report.to_html(&translator))?;
+    }
+
+    let mut targets: Vec<String> = Vec::new();
+    if let Some(path) = args.json {
+        targets.push(path.display().to_string());
+    }
+    if let Some(path) = args.html {
+        targets.push(path.display().to_string());
+    }
     println!(
-        "Raport zapisany: {} (modułów: {module_count}, błędów: {error_count})",
-        args.json.display()
+        "Raport zapisany: {} (modułów: {}, błędów: {})",
+        targets.join(", "),
+        report.modules.len(),
+        report.errors.len()
     );
 
-    if let Some(errors) = report["errors"].as_array() {
-        for error in errors {
-            println!(
-                "  ! {}: {}",
-                error["module"].as_str().unwrap_or("?"),
-                error["error"]
-            );
-        }
+    for failure in &report.errors {
+        println!("  ! {}: {}", failure.module, failure.error);
     }
     Ok(())
 }
@@ -124,12 +150,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_report_subcommand_with_path() {
+    fn parses_report_subcommand_with_json_path() {
         let cli = Cli::try_parse_from(["serwiskit", "report", "--json", "raport.json"])
             .expect("poprawne argumenty");
         match cli.command {
             Some(Command::Report(args)) => {
-                assert_eq!(args.json, PathBuf::from("raport.json"));
+                assert_eq!(args.json, Some(PathBuf::from("raport.json")));
+                assert!(args.html.is_none());
                 assert!(args.module.is_none());
                 assert!(matches!(args.locale, LocaleArg::Pl));
             }
@@ -138,21 +165,22 @@ mod tests {
     }
 
     #[test]
-    fn parses_module_and_locale_flags() {
+    fn parses_html_output_and_module_filter() {
         let cli = Cli::try_parse_from([
             "serwiskit",
             "report",
-            "--json",
-            "out.json",
+            "--html",
+            "raport.html",
             "--module",
-            "system.info",
+            "hw.cpu",
             "--locale",
             "en",
         ])
         .expect("poprawne argumenty");
         match cli.command {
             Some(Command::Report(args)) => {
-                assert_eq!(args.module.as_deref(), Some("system.info"));
+                assert_eq!(args.html, Some(PathBuf::from("raport.html")));
+                assert_eq!(args.module.as_deref(), Some("hw.cpu"));
                 assert_eq!(Locale::from(args.locale), Locale::En);
             }
             None => panic!("oczekiwano podkomendy report"),
@@ -166,9 +194,22 @@ mod tests {
     }
 
     #[test]
+    fn requires_at_least_one_output() {
+        let error = run_report(ReportArgs {
+            json: None,
+            html: None,
+            module: Some("system.info".to_string()),
+            locale: LocaleArg::Pl,
+        })
+        .expect_err("brak wyjścia to błąd");
+        assert!(error.contains("--json"), "{error}");
+    }
+
+    #[test]
     fn rejects_unknown_module() {
         let error = run_report(ReportArgs {
-            json: PathBuf::from("nie-uzywany.json"),
+            json: Some(PathBuf::from("nie-uzywany.json")),
+            html: None,
             module: Some("nie.ma.takiego".to_string()),
             locale: LocaleArg::Pl,
         })

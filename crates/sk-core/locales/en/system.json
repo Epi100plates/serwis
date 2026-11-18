@@ -12,5 +12,8 @@
   "module.system_info.host.ram_total": "Installed RAM",
   "module.system_info.host.uptime": "Uptime",
   "module.system_info.host.local_time": "Local time",
+  "module.system_info.host.system_type": "Computer type",
+  "module.system_info.host.hypervisor": "Hypervisor present",
+  "module.system_info.note.hypervisor": "A present hypervisor means Hyper-V or core isolation is enabled — not necessarily a virtual machine.",
   "module.system_info.privileges": "Process privileges"
 }

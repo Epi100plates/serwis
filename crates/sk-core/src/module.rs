@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::Locale;
-use crate::providers::{Clock, HostEnv, WmiProvider};
+use crate::providers::{Clock, HostEnv, LiveSource, MachineInfo, WmiProvider};
 use crate::view::View;
 
 /// Jakie uprawnienia może potrzebować moduł. UI pokazuje to jako badge,
@@ -85,6 +85,10 @@ pub struct CollectCtx<'a> {
     pub wmi: &'a dyn WmiProvider,
     pub clock: &'a dyn Clock,
     pub host: &'a dyn HostEnv,
+    /// Dane spoza WMI: firmware, VRAM, EDID (implementacja w `sk-win`).
+    pub machine: &'a dyn MachineInfo,
+    /// Historia próbek telemetrii (pusta, jeśli nikt jeszcze nie próbkował).
+    pub live: &'a dyn LiveSource,
     pub locale: Locale,
 }
 

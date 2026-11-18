@@ -7,8 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::{ModuleError, Result};
 use crate::i18n::Locale;
+use crate::live::LiveSample;
 use crate::module::CollectCtx;
-use crate::providers::{Clock, HostEnv, WmiProvider};
+use crate::providers::{
+    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, WmiProvider,
+};
 
 /// WMI zwracające przygotowane wiersze. Fragment zapytania dopasowuje się do
 /// treści zapytania (np. `"Win32_OperatingSystem"`).
@@ -36,9 +39,12 @@ impl MockWmi {
 impl WmiProvider for MockWmi {
     fn query(&self, namespace: &str, wql: &str) -> Result<Vec<serde_json::Value>> {
         let haystack = format!("{namespace} {wql}");
+        // Najbardziej szczegółowy fragment wygrywa: zapytanie o
+        // `Win32_PhysicalMemoryArray` zawiera też `Win32_PhysicalMemory`.
         self.responses
             .iter()
-            .find(|(fragment, _)| haystack.contains(fragment.as_str()))
+            .filter(|(fragment, _)| haystack.contains(fragment.as_str()))
+            .max_by_key(|(fragment, _)| fragment.len())
             .map(|(_, rows)| rows.clone())
             .ok_or_else(|| {
                 ModuleError::unavailable(format!("mock WMI: brak odpowiedzi dla `{wql}`"))
@@ -105,12 +111,84 @@ impl HostEnv for MockHost {
     }
 }
 
+/// Dane maszynowe spoza WMI. Domyślnie puste — moduł ma pokazać degradację,
+/// nie zgadywać wartości.
+#[derive(Debug, Clone, Default)]
+pub struct MockMachine {
+    firmware: Firmware,
+    adapter_memory: Vec<AdapterMemory>,
+    edid: std::collections::HashMap<String, Vec<u8>>,
+}
+
+impl MockMachine {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_firmware(mut self, firmware: Firmware) -> Self {
+        self.firmware = firmware;
+        self
+    }
+
+    pub fn with_adapter_memory(mut self, name: impl Into<String>, bytes: u64) -> Self {
+        self.adapter_memory.push(AdapterMemory {
+            name: name.into(),
+            bytes,
+        });
+        self
+    }
+
+    pub fn with_edid(mut self, instance_name: impl Into<String>, edid: Vec<u8>) -> Self {
+        self.edid.insert(instance_name.into(), edid);
+        self
+    }
+}
+
+impl MachineInfo for MockMachine {
+    fn firmware(&self) -> Firmware {
+        self.firmware
+    }
+
+    fn adapter_memory(&self) -> Vec<AdapterMemory> {
+        self.adapter_memory.clone()
+    }
+
+    fn display_edid(&self, instance_name: &str) -> Option<Vec<u8>> {
+        self.edid.get(instance_name).cloned()
+    }
+}
+
+/// Historia telemetrii dla testów — moduł dostaje dokładnie podane próbki.
+#[derive(Debug, Clone, Default)]
+pub struct MockLive {
+    samples: Vec<LiveSample>,
+}
+
+impl MockLive {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_samples(mut self, samples: Vec<LiveSample>) -> Self {
+        self.samples = samples;
+        self
+    }
+}
+
+impl LiveSource for MockLive {
+    fn samples(&self) -> Vec<LiveSample> {
+        self.samples.clone()
+    }
+}
+
 /// Zestaw makiet + wygodne `ctx()`.
 #[derive(Debug)]
 pub struct Harness {
     pub wmi: MockWmi,
     pub clock: FixedClock,
     pub host: MockHost,
+    pub machine: MockMachine,
+    pub live: MockLive,
     pub locale: Locale,
 }
 
@@ -120,6 +198,8 @@ impl Harness {
             wmi: MockWmi::new(),
             clock: FixedClock::new(),
             host: MockHost::default(),
+            machine: MockMachine::new(),
+            live: MockLive::new(),
             locale: Locale::Pl,
         }
     }
@@ -139,6 +219,16 @@ impl Harness {
         self
     }
 
+    pub fn with_machine(mut self, machine: MockMachine) -> Self {
+        self.machine = machine;
+        self
+    }
+
+    pub fn with_live(mut self, live: MockLive) -> Self {
+        self.live = live;
+        self
+    }
+
     pub fn with_locale(mut self, locale: Locale) -> Self {
         self.locale = locale;
         self
@@ -149,6 +239,8 @@ impl Harness {
             wmi: &self.wmi,
             clock: &self.clock,
             host: &self.host,
+            machine: &self.machine,
+            live: &self.live,
             locale: self.locale,
         }
     }
@@ -173,6 +265,26 @@ mod tests {
             .expect("trafienie");
         assert_eq!(rows.len(), 1);
         assert!(wmi.query("ROOT\\CIMV2", "SELECT * FROM Win32_Fan").is_err());
+    }
+
+    #[test]
+    fn most_specific_fragment_wins() {
+        let wmi = MockWmi::new()
+            .with_rows(
+                "Win32_PhysicalMemory",
+                vec![serde_json::json!({"Source": "modules"})],
+            )
+            .with_rows(
+                "Win32_PhysicalMemoryArray",
+                vec![serde_json::json!({"Source": "array"})],
+            );
+        let rows = wmi
+            .query(
+                crate::providers::NS_CIMV2,
+                "SELECT MaxCapacity FROM Win32_PhysicalMemoryArray",
+            )
+            .expect("trafienie");
+        assert_eq!(rows[0]["Source"], "array");
     }
 
     #[test]

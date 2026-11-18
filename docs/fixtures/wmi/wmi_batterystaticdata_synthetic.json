@@ -1,0 +1,20 @@
+[
+  {
+    "Active": true,
+    "Caption": "Battery Static Data",
+    "Chemistry": 6,
+    "CriticalBias": 0,
+    "DefaultAlert1": 1900,
+    "DefaultAlert2": 2850,
+    "Description": "Battery Static Data",
+    "DesignedCapacity": 57000,
+    "DeviceName": "5B10W13961",
+    "ExpectedLife": 0,
+    "InstanceName": "ACPI\\PNP0C0A\\1_0",
+    "ManufactureDate": "2023-06-14T00:00:00+02:00",
+    "ManufactureName": "SMP",
+    "Name": "Battery Static Data",
+    "SerialNumber": "SN-REDACTED",
+    "Status": null
+  }
+]

@@ -1,6 +1,6 @@
 # Jak dodać nowy moduł do SerwisKit
 
-Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 0, 2026‑11‑18). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
+Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 1, 2026‑11‑18). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
 
 Zasada nadrzędna: **moduł to jeden plik i nie dotyka kodu UI.** Jeśli musisz zmienić renderer, żeby dodać moduł, to znaczy, że moduł jest źle zaprojektowany albo brakuje typu bloku w kontrakcie (procedura w §9).
 
@@ -10,21 +10,32 @@ Zasada nadrzędna: **moduł to jeden plik i nie dotyka kodu UI.** Jeśli musisz 
 
 ```
 crates/
-  sk-core/                 kontrakt: Module, View, Capability, błędy, i18n, rejestr, makiety testowe
+  sk-core/                 kontrakt: Module, View, Capability, błędy, i18n, rejestr, telemetria, makiety
     locales/pl/*.json      tłumaczenia (jeden plik na rodzinę modułów)
     locales/en/*.json
-  sk-win/                  WMI, zegar, środowisko procesu — JEDYNE miejsce z `unsafe`
+  sk-win/                  WMI + cache, zegar, środowisko procesu, rejestr, EDID — JEDYNE miejsce z `unsafe`
   sk-modules/              MODUŁY: jeden plik = jeden moduł
+    src/edid.rs           parser EDID (czysty Rust, testy na fixtures)
+    src/util.rs           wspólne dekodowanie WMI i formatowanie wartości
     src/modules/mod.rs     lista modułów i rejestracja (dwie linie na moduł)
-    src/modules/system_info.rs
-  sk-app/                  binarka `serwiskit`: egui + clap + generyczny renderer widoków
+    src/modules/hw_*.rs    moduły sprzętowe
+    tests/contract.rs      automatyczne testy każdego modułu
+    tests/hardware.rs      testy sprzętowe `#[ignore]` (prawdziwe WMI)
+  sk-app/                  binarka `serwiskit`: egui + clap + renderer widoków + raport JSON/HTML
+    src/html.rs            raport HTML z modelu `View` (inline SVG dla wykresów)
+    src/live.rs            próbkowanie telemetrii dla `system.live`
+    src/report.rs          jedno zbieranie → JSON i HTML
 docs/
   PLAN.md                  plan i decyzje architektoniczne
   MODULE_GUIDE.md          ten dokument
+  fixtures/wmi/*.json      prawdziwe odpowiedzi WMI (po anonimizacji) do testów
+  fixtures/edid/*.hex      bloki EDID monitorów testowych
+tools/
+  collect-wmi-fixtures.ps1 zbieranie fixtures z bieżącej maszyny
 AGENTS.md                  zasady dla agentów AI (czytaj pierwsze)
 ```
 
-Planowane crate'y kolejnych faz: `sk-storage` (benchmarki, surface test), `sk-migrate` (pakiety `.skpkg`), `sk-report` (HTML). Nie twórz ich w zadaniu modułowym.
+Planowane crate'y kolejnych faz: `sk-storage` (benchmarki, surface test), `sk-migrate` (pakiety `.skpkg`). Raport HTML **nie** jest osobnym crate'em — powstaje w `sk-app` z tego samego modelu widoku co GUI. Nie twórz nowych crate'ów w zadaniu modułowym.
 
 **Zakresy zapisu (write scope) przy pracy równoległej botów:**
 
@@ -79,16 +90,20 @@ Kontekst zbierania — wszystko, co łączy moduł ze światem, jest wstrzykiwan
 
 ```rust
 pub struct CollectCtx<'a> {
-    pub wmi: &'a dyn WmiProvider,  // query(namespace, wql) -> Vec<serde_json::Value>
-    pub clock: &'a dyn Clock,      // now(), uptime_secs()
-    pub host: &'a dyn HostEnv,     // is_elevated()
+    pub wmi: &'a dyn WmiProvider,      // query(namespace, wql) -> Vec<serde_json::Value>
+    pub clock: &'a dyn Clock,          // now(), uptime_secs()
+    pub host: &'a dyn HostEnv,         // is_elevated()
+    pub machine: &'a dyn MachineInfo,  // firmware(), adapter_memory(), display_edid()
+    pub live: &'a dyn LiveSource,      // samples() — historia telemetrii (Faza 1)
     pub locale: Locale,
 }
 ```
 
+`MachineInfo` istnieje dlatego, że WMI **nie** daje trzech rzeczy: trybu firmware (`GetFirmwareType`), realnego VRAM (`AdapterRAM` jest 32‑bitowe i obcina do 4 GiB) i EDID monitora (tylko rejestr). Wszystkie metody mają domyślne implementacje, więc makieta nie musi ich znać — brak danych jest poprawnym stanem.
+
 Kolejne fazy rozszerzą kontekst (Faza 2: `devices: &dyn RawDevice` do surowych sektorów, Faza 3: `dpapi: &dyn Dpapi`). Rozszerzenie wykonuje lider, nie autor modułu.
 
-Widok (to renderuje `sk-app`, moduł nigdy nie importuje `egui`):
+Widok (to renderuje `sk-app`; ten sam model trafia do raportu HTML, moduł nigdy nie importuje `egui`):
 
 ```rust
 pub struct View { pub sections: Vec<Section> }
@@ -102,11 +117,27 @@ pub struct Section {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Block {
     KeyValues { rows: Vec<KeyValue> },          // etykieta (klucz i18n) + wartość (dana)
-    Table { table: Table },                     // nagłówki (klucze i18n) + wiersze
+    Table { table: Table },                     // nagłówki (klucze i18n) + wiersze (dane)
     Note { level: NoteLevel, text_key: String },// Info | Warn | Error — degradacja, brak danych
     Badge { text_key: String },                 // np. "Administrator", "Niedostępne przez USB"
+    Chart { chart: Chart },                     // wykres liniowy (Faza 1: system.live)
+}
+
+pub struct KeyValue {
+    pub label_key: String,
+    pub value: String,                 // dana
+    pub value_key: Option<String>,     // alternatywa: klucz i18n (np. Tak/Nie)
+}
+
+pub struct Chart {
+    pub title_key: String,             // etykieta wykresu = klucz i18n
+    pub x_label: String,               // jednostka osi, np. "s"
+    pub y_label: String,               // jednostka osi, np. "%"
+    pub series: Vec<ChartSeries>,      // label = dana ("CPU"), points = [x, y]
 }
 ```
+
+Reguła rozróżniania tekstu i danych: **kluczem i18n jest wszystko, co jest zdaniem lub etykietą** (nazwy sekcji, nagłówki tabel, etykiety wierszy, komunikaty, wartości logiczne). **Daną jest to, co przyszło z WMI lub z obliczeń** (nazwa procesora, numer seryjny, „3200 MHz”, „2010‑W46”). Nie wpisuj do wartości słów typu „tydzień” — wybierz format neutralny językowo (ISO 8601) albo użyj `value_key`.
 
 Rejestracja: **jawna lista** w `crates/sk-modules/src/modules/mod.rs`:
 
@@ -219,11 +250,13 @@ mod tests {
 use sk_core::testing::{Harness, MockWmi};
 
 let wmi = MockWmi::new()
-    .with_rows("Win32_Processor", vec![serde_json::json!({ "Name": "AMD Ryzen 5 5600" })]);
+    .with_rows("Win32_Processor", fixture_rows!("win32_processor.json"));
 let harness = Harness::new().with_wmi(wmi);
 ```
 
-Dane w makiecie mają odwzorowywać **prawdziwą** odpowiedź WMI (skopiuj wartości z maszyny, usuń seriale/UUID/nazwy użytkownika). Od Fazy 1 fixtures trzymamy w `docs/fixtures/wmi/`.
+`fixture_rows!` to makro z `sk-modules/src/lib.rs` — wczytuje `docs/fixtures/wmi/<plik>` przez `include_str!` (ścieżka względem `CARGO_MANIFEST_DIR`, więc działa z każdego pliku modułu).
+
+Fixtures mają odwzorowywać **prawdziwą** odpowiedź WMI: zbierasz je skryptem `tools/collect-wmi-fixtures.ps1`, który sam usuwa artefakty PowerShell/CIM i anonimizuje seriale, UUID, nazwę komputera i właściciela. Gdy klasa na Twojej maszynie nie istnieje (np. `Win32_Battery` na desktopie), dopisz **syntetyczny** fixture z sufiksem `_synthetic.json` i opisz go w `docs/fixtures/wmi/README.md` — nie udawaj, że pochodzi z tej maszyny.
 
 **Krok 7.** Weryfikacja lokalna:
 
@@ -231,13 +264,14 @@ Dane w makiecie mają odwzorowywać **prawdziwą** odpowiedź WMI (skopiuj warto
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test --all
-cargo run -p sk-app                                   # moduł widoczny na liście, dane realne
-cargo run -p sk-app -- report --json out.json --module tools.timestamp
+cargo test -p sk-modules --test hardware -- --ignored   # prawdziwe WMI tej maszyny
+cargo run -p sk-app                                     # moduł widoczny na liście, dane realne
+cargo run -p sk-app -- report --json out.json --html out.html --module tools.timestamp
 ```
 
 **Krok 8.** Jeśli moduł wymaga administratora — ustaw `Capability::Elevated` i napisz w `desc`, **co konkretnie** wymaga uprawnień.
 
-**Krok 9.** Jeśli moduł ma długą operację (benchmark, kopiowanie profilu) — **nie rób tego w `collect()`**. Do Fazy 2 `TaskDescriptor` jeszcze nie istnieje; zgłoś potrzebę liderowi, zamiast blokować wątek UI.
+**Krok 9.** Jeśli moduł ma długą operację (benchmark, kopiowanie profilu) — **nie rób tego w `collect()`**. Do Fazy 2 `TaskDescriptor` jeszcze nie istnieje; zgłoś potrzebę liderowi, zamiast blokować wątek UI. Wzorzec dla danych „w czasie” już istnieje: moduł `system.live` czyta `ctx.live.samples()`, a próbki zbiera wątek roboczy aplikacji (raz na sekundę, z throttle w UI).
 
 **Krok 10.** Uzupełnij checklistę z §7 i zgłoś PR z szablonem z §11.
 
@@ -277,6 +311,28 @@ pub struct TaskDescriptor {
 }
 ```
 
+### 5.1 Wykresy i dane w czasie
+
+Jeśli moduł pokazuje coś, co zmienia się w czasie, **nie próbkuj w `collect()`**. Wzorzec z Fazy 1 (`system.live`):
+
+```rust
+fn collect(&self, ctx: &CollectCtx<'_>) -> Result<ModuleOutput> {
+    let samples = ctx.live.samples();               // historia z wątku roboczego
+    if samples.is_empty() {
+        return Ok(ModuleOutput { data: json!({}), view: /* Note: brak próbek */ });
+    }
+    let points: Vec<[f64; 2]> = samples
+        .iter()
+        .filter_map(|s| s.cpu_load_percent.map(|v| [s.elapsed_secs, v]))
+        .collect();
+    let chart = Chart::new("module.x.chart", "s", "%")
+        .with_series(vec![ChartSeries::new("CPU", points)]);
+    // Block::chart(chart) renderuje egui_plot w GUI, a raport HTML — inline SVG
+}
+```
+
+Próbki zbiera wątek roboczy aplikacji (`sk-app/src/live.rs`) i tylko wtedy, gdy moduł jest otwarty w GUI. Dzięki temu `collect()` jest natychmiastowe, a moduł pozostaje bezstanowy i testowalny przez `MockLive`.
+
 ---
 
 ## 6. Testy, których oczekuje review
@@ -286,9 +342,9 @@ pub struct TaskDescriptor {
 | jednostkowy na makiecie | logika bez sprzętu | w pliku modułu |
 | kompletność kluczy i18n | brak „martwych” napisów | w pliku modułu (`Translator::load` + `has`) |
 | kontrakt (automatyczny) | unikalne `id`, klucze metadanych, brak paniki | `crates/sk-modules/tests/contract.rs` — nic nie dopisujesz |
-| sprzętowy `#[ignore]` | realne WMI na maszynie serwisowej | obok, `cargo test -- --ignored` |
+| sprzętowy `#[ignore]` | realne WMI na maszynie serwisowej | `crates/sk-modules/tests/hardware.rs` — dopisz swój `id` do listy modułów, jeśli chcesz go tam objąć |
 
-Makieta: `sk_core::testing::{Harness, MockWmi, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`.
+Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`.
 
 ---
 
@@ -297,12 +353,14 @@ Makieta: `sk_core::testing::{Harness, MockWmi, FixedClock, MockHost}` — dostę
 - [ ] `meta()` kompletne: unikalne `id`, klucze `name`/`desc`, właściwy `group`, uczciwe `capability`.
 - [ ] `collect()` nie panikuje, nie blokuje > 200 ms, nie robi sieci.
 - [ ] Braki sprzętowe/uprawnieniowe → `Block::Note`, nie błąd całego modułu.
-- [ ] Klucze i18n w `pl` **i** `en`.
+- [ ] Klucze i18n w `pl` **i** `en`; żadnej prozy w wartościach (`value_key` albo format neutralny).
 - [ ] Test jednostkowy na makiecie (+ test kompletności kluczy widoku).
-- [ ] Test sprzętowy `#[ignore]` wykonany ręcznie (jeśli dotyczy sprzętu) — wynik w opisie PR.
+- [ ] Fixtures w `docs/fixtures/` (prawdziwe z maszyny albo jawnie `_synthetic`).
+- [ ] Test sprzętowy `#[ignore]` wykonany ręcznie (`cargo test -p sk-modules --test hardware -- --ignored`) — wynik w opisie PR.
 - [ ] `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` zielone.
 - [ ] Zero `unsafe`, zero `unwrap()` na danych zewnętrznych, zero sekretów w logach.
 - [ ] Dwie linie w `modules/mod.rs` w kolejności alfabetycznej.
+- [ ] Nowe klucze dodane do `pl` i `en` w tym samym PR (test `poland_and_english_have_identical_key_sets` tego pilnuje).
 
 ---
 
@@ -311,12 +369,14 @@ Makieta: `sk_core::testing::{Harness, MockWmi, FixedClock, MockHost}` — dostę
 | Anty‑wzorzec | Dlaczego |
 |---|---|
 | Gotowe stringi w `Block` zamiast kluczy i18n | brak EN, brak testu kompletności |
+| Proza w wartości komórki tabeli („2010, tydzień 46”) | nie da się przetłumaczyć; używaj formatu neutralnego (`2010‑W46`) albo `value_key` |
 | `unwrap()` na wyniku WMI | panika na nietypowym sprzęcie klienta |
 | Wołanie `egui` z modułu | moduł przestaje być testowalny bez okna |
 | Jeden moduł „wszystko o sprzęcie” | nie da się przypisać właściciela, konflikt przy pracy równoległej |
 | Ciche pomijanie błędów (`let _ = ...`) | technik dostaje niepełny raport i nie wie dlaczego |
 | Nowe `unsafe` w module | jedna brama FFI, łatwiejszy audyt |
 | `sleep`/retry w `collect()` | blokuje UI; od tego będą zadania w tle |
+| Syntetyczny fixture udający prawdziwy | wprowadza w błąd przy analizie regresji — oznacz `_synthetic` |
 | Kopiowanie danych z sieci w module | narusza zasadę offline |
 
 ---

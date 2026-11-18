@@ -1,12 +1,17 @@
 //! SerwisKit — punkt wejścia.
 //!
 //! Bez argumentów uruchamia GUI; z podkomendą działa w trybie konsolowym
-//! (raport JSON). Logika modułów jest wspólna dla obu trybów.
+//! (raport JSON i/lub HTML). Logika modułów jest wspólna dla obu trybów.
 
 mod app;
 mod cli;
+mod html;
+mod live;
 mod render;
 mod report;
+
+#[cfg(test)]
+mod tests_support;
 
 fn main() -> std::process::ExitCode {
     match cli::run() {

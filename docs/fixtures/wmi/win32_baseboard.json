@@ -1,0 +1,35 @@
+[
+    {
+        "Caption":  "Płyta główna",
+        "Description":  "Płyta główna",
+        "InstallDate":  null,
+        "Name":  "Płyta główna",
+        "Status":  "OK",
+        "CreationClassName":  "Win32_BaseBoard",
+        "Manufacturer":  "Micro-Star International Co., Ltd.",
+        "Model":  null,
+        "OtherIdentifyingInfo":  null,
+        "PartNumber":  null,
+        "PoweredOn":  true,
+        "SerialNumber":  "SN-REDACTED",
+        "SKU":  null,
+        "Tag":  "Base Board",
+        "Version":  "1.0",
+        "Depth":  null,
+        "Height":  null,
+        "HotSwappable":  false,
+        "Removable":  false,
+        "Replaceable":  true,
+        "Weight":  null,
+        "Width":  null,
+        "HostingBoard":  true,
+        "RequirementsDescription":  null,
+        "RequiresDaughterBoard":  false,
+        "SlotLayout":  null,
+        "SpecialRequirements":  null,
+        "ConfigOptions":  [
+                              "To be filled by O.E.M."
+                          ],
+        "Product":  "A320M-A PRO M2 (MS-7C52)"
+    }
+]

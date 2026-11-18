@@ -1,23 +1,35 @@
 //! Okno aplikacji: lista modułów, generyczny renderer widoków, wątek roboczy.
 //!
-//! Zbieranie danych nigdy nie dzieje się na wątku UI — moduły mogą odpytywać
-//! WMI setki milisekund, a w kolejnych fazach dojdą benchmarki dysków.
+//! Zbieranie danych nigdy nie dzieje się na wątku UI — moduły odpyłują WMI
+//! setki milisekund, a telemetria próbkuje co sekundę. Wątek roboczy trzyma
+//! też historię próbek (`LiveHistory`), więc `system.live` jest bezstanowe.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use sk_core::i18n::{Locale, Translator};
+use sk_core::live::LiveHistory;
 use sk_core::module::{Capability, CollectCtx, ModuleMeta, ModuleOutput};
 use sk_core::registry::ModuleRegistry;
-use sk_win::{SystemClock, WinHostEnv, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinWmi};
 
+use crate::live::sample;
 use crate::render;
+use crate::report::{Report, ReportOptions};
+
+const LIVE_MODULE_ID: &str = "system.live";
+const LIVE_INTERVAL: Duration = Duration::from_secs(1);
+/// 600 próbek = 10 minut historii przy próbkowaniu co sekundę.
+const LIVE_HISTORY_CAPACITY: usize = 600;
 
 enum Job {
     CollectAll,
+    SampleLive,
+    ExportHtml { path: PathBuf, locale: Locale },
 }
 
 enum Event {
@@ -26,6 +38,7 @@ enum Event {
         result: Result<ModuleOutput, String>,
     },
     Done,
+    ExportDone(Result<String, String>),
 }
 
 pub fn run_gui() -> Result<(), String> {
@@ -56,6 +69,9 @@ struct SerwisApp {
     jobs: Option<Sender<Job>>,
     events: Receiver<Event>,
     pending: bool,
+    live_pending: bool,
+    next_live_at: Instant,
+    status: Option<Result<String, String>>,
     startup_error: Option<String>,
 }
 
@@ -92,6 +108,9 @@ impl SerwisApp {
             jobs,
             events: event_rx,
             pending: false,
+            live_pending: false,
+            next_live_at: Instant::now(),
+            status: None,
             startup_error,
         };
         app.request_refresh();
@@ -100,8 +119,37 @@ impl SerwisApp {
 
     fn request_refresh(&mut self) {
         self.pending = true;
+        self.status = None;
         if let Some(jobs) = &self.jobs {
             let _ = jobs.send(Job::CollectAll);
+        }
+    }
+
+    /// Jedna próbka telemetrii na sekundę, tylko gdy moduł live jest otwarty.
+    fn request_live_sample(&mut self) {
+        if self.live_pending || Instant::now() < self.next_live_at {
+            return;
+        }
+        if let Some(jobs) = &self.jobs
+            && jobs.send(Job::SampleLive).is_ok()
+        {
+            self.live_pending = true;
+            self.next_live_at = Instant::now() + LIVE_INTERVAL;
+        }
+    }
+
+    fn export_html(&mut self) {
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = PathBuf::from(format!("raport-serwiskit-{stamp}.html"));
+        if let Some(jobs) = &self.jobs
+            && jobs
+                .send(Job::ExportHtml {
+                    path,
+                    locale: self.translator.locale(),
+                })
+                .is_ok()
+        {
+            self.status = None;
         }
     }
 
@@ -110,6 +158,9 @@ impl SerwisApp {
         loop {
             match self.events.try_recv() {
                 Ok(Event::Module { id, result }) => {
+                    if id == LIVE_MODULE_ID {
+                        self.live_pending = false;
+                    }
                     self.results.insert(id, result);
                     received = true;
                 }
@@ -117,9 +168,14 @@ impl SerwisApp {
                     self.pending = false;
                     received = true;
                 }
+                Ok(Event::ExportDone(result)) => {
+                    self.status = Some(result);
+                    received = true;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.pending = false;
+                    self.live_pending = false;
                     break;
                 }
             }
@@ -149,14 +205,30 @@ impl SerwisApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(self.translator.t("ui.refresh")).clicked() {
-                    self.request_refresh();
-                }
                 if self.pending {
                     ui.spinner();
                 }
+                if ui.button(self.translator.t("ui.refresh")).clicked() {
+                    self.request_refresh();
+                }
+                if ui.button(self.translator.t("ui.export_html")).clicked() {
+                    self.export_html();
+                }
             });
         });
+
+        if let Some(status) = &self.status {
+            match status {
+                Ok(path) => {
+                    let text = format!("{}: {path}", self.translator.t("ui.export_saved"));
+                    ui.label(egui::RichText::new(text).small().weak());
+                }
+                Err(message) => {
+                    let text = format!("{}: {message}", self.translator.t("ui.export_failed"));
+                    ui.colored_label(egui::Color32::from_rgb(220, 90, 90), text);
+                }
+            }
+        }
     }
 
     fn module_list(&mut self, ui: &mut egui::Ui) {
@@ -187,6 +259,8 @@ impl SerwisApp {
                     let name = self.translator.t(meta.name_key);
                     if ui.selectable_label(selected, name).clicked() {
                         self.selected = Some(meta.id);
+                        // Po wejściu w telemetrię pierwsza próbka idzie od razu.
+                        self.next_live_at = Instant::now();
                     }
                 }
             });
@@ -251,6 +325,12 @@ impl eframe::App for SerwisApp {
         if self.drain_events() {
             ctx.request_repaint();
         }
+
+        if self.selected == Some(LIVE_MODULE_ID) {
+            self.request_live_sample();
+            // Wybudzaj UI na tyle często, żeby próbka była pobrana blisko terminu.
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
         if self.pending {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
@@ -268,35 +348,108 @@ fn worker_loop(registry: ModuleRegistry, jobs: Receiver<Job>, events: Sender<Eve
     let wmi = WinWmi::new();
     let clock = SystemClock::new();
     let host = WinHostEnv::new();
+    let machine = WinMachine::new();
+    let mut history = LiveHistory::new(LIVE_HISTORY_CAPACITY);
+    let started = Instant::now();
+    let locale = Locale::Pl;
 
     while let Ok(job) = jobs.recv() {
         match job {
             Job::CollectAll => {
+                wmi.begin_round();
                 let ctx = CollectCtx {
                     wmi: &wmi,
                     clock: &clock,
                     host: &host,
-                    locale: Locale::Pl,
+                    machine: &machine,
+                    live: &history,
+                    locale,
                 };
-                for module in registry.modules() {
-                    let meta = module.meta();
-                    let result = module.collect(&ctx).map_err(|err| err.to_string());
-                    if events
-                        .send(Event::Module {
-                            id: meta.id,
-                            result,
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
+                if !collect_all(&registry, &ctx, &events) {
+                    return;
                 }
-                if events.send(Event::Done).is_err() {
+            }
+            Job::SampleLive => {
+                wmi.begin_round();
+                let elapsed = started.elapsed().as_secs_f64();
+                sample(&wmi, &mut history, elapsed);
+
+                let ctx = CollectCtx {
+                    wmi: &wmi,
+                    clock: &clock,
+                    host: &host,
+                    machine: &machine,
+                    live: &history,
+                    locale,
+                };
+                let Some(module) = registry.find(LIVE_MODULE_ID) else {
+                    continue;
+                };
+                let result = module.collect(&ctx).map_err(|err| err.to_string());
+                if events
+                    .send(Event::Module {
+                        id: LIVE_MODULE_ID,
+                        result,
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Job::ExportHtml { path, locale } => {
+                wmi.begin_round();
+                let ctx = CollectCtx {
+                    wmi: &wmi,
+                    clock: &clock,
+                    host: &host,
+                    machine: &machine,
+                    live: &history,
+                    locale,
+                };
+                let options = ReportOptions {
+                    module_filter: None,
+                    app_version: env!("CARGO_PKG_VERSION"),
+                };
+                let report = Report::collect(&registry, &ctx, &options);
+                let result = write_report_html(&report, locale, &path);
+                if events.send(Event::ExportDone(result)).is_err() {
+                    return;
+                }
+                if !collect_all(&registry, &ctx, &events) {
                     return;
                 }
             }
         }
     }
+}
+
+fn write_report_html(
+    report: &Report,
+    locale: Locale,
+    path: &std::path::Path,
+) -> Result<String, String> {
+    let mut translator = Translator::load().map_err(|err| format!("tłumaczenia: {err}"))?;
+    translator.set_locale(locale);
+    let html = report.to_html(&translator);
+    crate::report::write_html(path, &html)?;
+    Ok(path.display().to_string())
+}
+
+fn collect_all(registry: &ModuleRegistry, ctx: &CollectCtx<'_>, events: &Sender<Event>) -> bool {
+    for module in registry.modules() {
+        let meta = module.meta();
+        let result = module.collect(ctx).map_err(|err| err.to_string());
+        if events
+            .send(Event::Module {
+                id: meta.id,
+                result,
+            })
+            .is_err()
+        {
+            return false;
+        }
+    }
+    events.send(Event::Done).is_ok()
 }
 
 fn capability_color(capability: Capability) -> egui::Color32 {

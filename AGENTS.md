@@ -12,9 +12,11 @@ SerwisKit — open‑source narzędzie serwisowe dla Windows 10/11 x64 w Rust z 
 cargo fmt --all                       # formatowanie
 cargo clippy --all-targets -- -D warnings
 cargo test --all                      # testy bez sprzętu (mocki)
-cargo test --all -- --ignored         # testy sprzętowe, WYMAGAJĄ administratora
+cargo test -p sk-modules --test hardware -- --ignored   # testy sprzętowe: prawdziwe WMI tej maszyny
+cargo test -p sk-win -- --ignored     # testy sprzętowe warstwy Windows (rejestr/EDID/firmware)
 cargo run -p sk-app                   # GUI
-cargo run -p sk-app -- report --json out.json     # tryb CLI/headless
+cargo run -p sk-app -- report --json out.json              # tryb CLI: raport JSON
+cargo run -p sk-app -- report --json out.json --html out.html   # JSON + HTML
 cargo build --release                 # artefakt: target\release\serwiskit.exe
 ```
 
@@ -25,7 +27,7 @@ Wszystkie cztery bramki (`fmt`, `clippy`, `test`, `build`) muszą być zielone p
 1. `unsafe` wyłącznie w `crates/sk-win`. Moduł potrzebujący nowego wywołania systemowego zgłasza to, nie dopisuje FFI u siebie.
 2. Zero sieci w kodzie produktu: brak HTTP, telemetrii, auto‑update w modułach.
 3. Zero `unwrap()`/`expect()` na danych zewnętrznych (WMI, pliki, rejestry, I/O). Błąd → `ModuleError` z kontekstem.
-4. Żadnych tekstów widocznych dla użytkownika poza i18n (`pl` + `en`).
+4. Żadnych tekstów widocznych dla użytkownika poza i18n (`pl` + `en`). Dotyczy to też **wartości** w widoku: jeśli wartość jest zdaniem lub stanem (Tak/Nie, „Nieznane”), użyj `KeyValue::state(..., klucz)`; jeśli przyszła z WMI — to dana i ma być neutralna językowo (`2010-W46`, nie „2010, tydzień 46”).
 5. Nie blokuj wątku UI: operacje > ~200 ms to `TaskDescriptor` w wątku roboczym.
 6. Nie zmieniaj publicznego kontraktu (`sk-core`), `Cargo.toml` ani `docs/PLAN.md` w zadaniu modułowym — to wymaga zgody lidera i ADR.
 7. Nie wymyślaj API, flag ani wersji. Sprawdź w dokumentacji Microsoft/crates.io; jeśli nie potwierdzone — napisz „niepotwierdzone”.
@@ -70,6 +72,26 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 - Temperatury rdzeni CPU, napięcia i wentylatory wymagają kodu w ring 0 — poza zakresem 1.0, planowane w Fazie 5 (helper LHM + PawnIO).
 - Przenoszenie haseł Chrome/Edge przez kopiowanie plików nie działa (DPAPI per maszyna, ABE `v20`). Nie implementuj obejść ABE.
 - `profiles.ini` Firefoksa czytaj jako UTF‑8 (nie CP1250), inaczej nazwy profili się rozjadą.
+
+**Faza 1 — potwierdzone na tej maszynie (2026‑11‑18):**
+
+- `Win32_PhysicalMemoryArray.MaxCapacity` jest w **kilobajtach** (134217728 KB = 128 GiB). Preferuj `MaxCapacityEx`.
+- `root\wmi ProcessorPerformance` ma właściwości **małymi literami**: `frequency`, `percentage`, `power`, `InstanceName` = `PPM_Processor_N`. Nie ma `PercentFrequency`.
+- `Win32_VideoController.AdapterRAM` = **4 293 918 720** B (4 GiB − 1 MiB) dla 12 GB karty. Od tej wartości traktuj ją jako obciętą; realny VRAM: `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\NNNN\HardwareInformation.qwMemorySize` (QWORD), nazwa adaptera w `DriverDesc`.
+- `WmiMonitorID.ManufacturerName`/`UserFriendlyName`/`ProductCodeID` to tablice kodów UTF‑16 (16 znaków, zera na końcu) — dekoduj, nie pokazuj liczb.
+- EDID monitora: `HKLM\SYSTEM\CurrentControlSet\Enum\<InstanceName bez sufiksu _N>\Device Parameters\EDID`. `InstanceName` z WMI (`DISPLAY\SAM0928\7&…&UID264_0`) różni się tylko sufiksem. Parser: `crates/sk-modules/src/edid.rs`, fixtures w `docs/fixtures/edid/`.
+- `GetFirmwareType` (kernel32) → 2 = UEFI, 1 = BIOS; dostępne przez trait `MachineInfo`.
+- Klasy baterii (`BatteryStaticData`, `BatteryFullChargedCapacity`, `BatteryStatus`) na desktopie zwracają „Invalid class” — moduł ma pokazać brak baterii, nie błąd. Liczba cykli wymaga `IOCTL_BATTERY_QUERY_INFORMATION` (niezaimplementowane).
+- `MockWmi` wybiera odpowiedź po **najdłuższym** pasującym fragmencie zapytania (inaczej `Win32_PhysicalMemoryArray` łapie odpowiedź dla `Win32_PhysicalMemory`).
+- Raport HTML powstaje z modelu `View` (`sk-app/src/html.rs`), nie z szablonów per moduł; wykresy to inline SVG. Nie dodawaj `askama`.
+- Telemetria: próbki zbiera wątek roboczy (`sk-app/src/live.rs`) raz na sekundę **tylko gdy `system.live` jest otwarte**; bufor 600 próbek. `collect()` modułu nie próbkuje.
+- Sprawdzanie GUI: `PrintWindow` **nie** przechwytuje treści renderowanej przez wgpu (dostajesz biały obraz). Użyj `CopyFromScreen` po `SetForegroundWindow` albo `egui_kittest` w testach.
+
+**PowerShell w tym środowisku (5.1, tylko `powershell.exe`):**
+
+- Uruchamianie skryptów wymaga `-ExecutionPolicy Bypass -File` (polityka blokuje `.ps1`).
+- `-Encoding utf8NoBOM` nie istnieje w 5.1 — pisz przez `[System.IO.File]::WriteAllText(path, text, New-Object System.Text.UTF8Encoding($false))`.
+- Plik `.ps1` bez BOM jest czytany jako CP1250, a bajty UTF‑8 dla „—”, „…”, „→” trafiają w znaki cytowania PowerShella i **psują parser**. Skrypty trzymaj ASCII-only albo zapisuj z BOM.
 
 ## Styl pracy
 

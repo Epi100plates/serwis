@@ -6,6 +6,7 @@
 
 pub mod error;
 pub mod i18n;
+pub mod live;
 pub mod module;
 pub mod providers;
 pub mod registry;
@@ -18,8 +19,14 @@ pub mod testing;
 pub mod prelude {
     pub use crate::error::{ModuleError, Result};
     pub use crate::i18n::{Locale, Translator};
+    pub use crate::live::{LiveHistory, LiveSample, percent_of};
     pub use crate::module::{Capability, CollectCtx, Group, Module, ModuleMeta, ModuleOutput};
-    pub use crate::providers::{Clock, HostEnv, NS_CIMV2, NS_WMI, WmiProvider};
+    pub use crate::providers::{
+        AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, NS_CIMV2, NS_WMI,
+        WmiProvider,
+    };
     pub use crate::registry::ModuleRegistry;
-    pub use crate::view::{Badge, Block, KeyValue, NoteLevel, Section, Table, View};
+    pub use crate::view::{
+        Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, Table, View,
+    };
 }

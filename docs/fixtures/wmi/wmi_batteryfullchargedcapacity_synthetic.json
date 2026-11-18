@@ -1,0 +1,11 @@
+[
+  {
+    "Active": true,
+    "Caption": "Battery Full Charged Capacity",
+    "Description": "Battery Full Charged Capacity",
+    "FullChargedCapacity": 48210,
+    "InstanceName": "ACPI\\PNP0C0A\\1_0",
+    "Name": "Battery Full Charged Capacity",
+    "Status": null
+  }
+]

@@ -1,0 +1,18 @@
+[
+    {
+        "Active":  true,
+        "DisplayTransferCharacteristic":  140,
+        "InstanceName":  "DISPLAY\\SAM0928\\7\u00261c9e91e2\u00260\u0026UID264_0",
+        "MaxHorizontalImageSize":  41,
+        "MaxVerticalImageSize":  23,
+        "VideoInputType":  1
+    },
+    {
+        "Active":  true,
+        "DisplayTransferCharacteristic":  120,
+        "InstanceName":  "DISPLAY\\GBT2730\\7\u00261c9e91e2\u00260\u0026UID260_0",
+        "MaxHorizontalImageSize":  60,
+        "MaxVerticalImageSize":  33,
+        "VideoInputType":  1
+    }
+]

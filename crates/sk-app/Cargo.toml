@@ -21,6 +21,7 @@ clap.workspace = true
 tracing.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui_plot.workspace = true
 
 [dev-dependencies]
 sk-core = { path = "../sk-core", features = ["testing"] }

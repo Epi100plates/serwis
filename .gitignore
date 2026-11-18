@@ -5,3 +5,8 @@ out.json
 *.skpkg
 .idea/
 .vscode/
+
+# Artefakty weryfikacji (raporty, zrzuty ekranu) — nie wchodzą do repo.
+/out/
+.playwright-mcp/
+*.tmp

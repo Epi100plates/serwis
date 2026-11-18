@@ -4,10 +4,12 @@ use chrono::{DateTime, Local};
 use serde::Deserialize;
 use sk_core::prelude::*;
 
-const OS_QUERY: &str =
-    "SELECT Caption, Version, BuildNumber, OSArchitecture FROM Win32_OperatingSystem";
-const COMPUTER_QUERY: &str =
-    "SELECT Manufacturer, Model, TotalPhysicalMemory FROM Win32_ComputerSystem";
+use crate::util::{bool_row, decode_first, format_bytes, text};
+
+const OS_QUERY: &str = "SELECT Caption, Version, BuildNumber, OSArchitecture \
+     FROM Win32_OperatingSystem";
+const COMPUTER_QUERY: &str = "SELECT Manufacturer, Model, TotalPhysicalMemory, \
+     HypervisorPresent, PCSystemType, NumberOfLogicalProcessors FROM Win32_ComputerSystem";
 
 #[derive(Debug, Default, Deserialize)]
 struct OperatingSystem {
@@ -29,6 +31,12 @@ struct ComputerSystem {
     model: Option<String>,
     #[serde(rename = "TotalPhysicalMemory", default)]
     total_physical_memory: Option<u64>,
+    #[serde(rename = "HypervisorPresent", default)]
+    hypervisor_present: Option<bool>,
+    #[serde(rename = "PCSystemType", default)]
+    pc_system_type: Option<u16>,
+    #[serde(rename = "NumberOfLogicalProcessors", default)]
+    logical_processors: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -48,8 +56,8 @@ impl Module for SystemInfo {
 
     fn collect(&self, ctx: &CollectCtx<'_>) -> Result<ModuleOutput> {
         let os: OperatingSystem =
-            decode_row(&ctx.wmi.query(NS_CIMV2, OS_QUERY)?, "Win32_OperatingSystem")?;
-        let computer: ComputerSystem = decode_row(
+            decode_first(&ctx.wmi.query(NS_CIMV2, OS_QUERY)?, "Win32_OperatingSystem")?;
+        let computer: ComputerSystem = decode_first(
             &ctx.wmi.query(NS_CIMV2, COMPUTER_QUERY)?,
             "Win32_ComputerSystem",
         )?;
@@ -61,16 +69,43 @@ impl Module for SystemInfo {
         let elevated = ctx.host.is_elevated();
         let ram_total = computer
             .total_physical_memory
-            .map(format_gib)
-            .unwrap_or_else(|| "-".to_string());
+            .map_or_else(|| "-".to_string(), format_bytes);
+
+        let mut host_rows = vec![
+            KeyValue::new(
+                "module.system_info.host.manufacturer",
+                text(computer.manufacturer.as_deref()),
+            ),
+            KeyValue::new(
+                "module.system_info.host.model",
+                text(computer.model.as_deref()),
+            ),
+            KeyValue::new("module.system_info.host.ram_total", ram_total.clone()),
+            KeyValue::new("module.system_info.host.uptime", format_uptime(uptime_secs)),
+            KeyValue::new("module.system_info.host.local_time", local_time.clone()),
+        ];
+        host_rows.push(KeyValue::state(
+            "module.system_info.host.system_type",
+            system_type_key(computer.pc_system_type),
+        ));
+        host_rows.push(bool_row(
+            "module.system_info.host.hypervisor",
+            computer.hypervisor_present,
+        ));
 
         let view = View::new(vec![
             Section::new("module.system_info.section.os").with_blocks(vec![
                 Block::key_values(vec![
-                    KeyValue::new("module.system_info.os.caption", text(&os.caption)),
-                    KeyValue::new("module.system_info.os.version", text(&os.version)),
-                    KeyValue::new("module.system_info.os.build", text(&os.build_number)),
-                    KeyValue::new("module.system_info.os.arch", text(&os.os_architecture)),
+                    KeyValue::new("module.system_info.os.caption", text(os.caption.as_deref())),
+                    KeyValue::new("module.system_info.os.version", text(os.version.as_deref())),
+                    KeyValue::new(
+                        "module.system_info.os.build",
+                        text(os.build_number.as_deref()),
+                    ),
+                    KeyValue::new(
+                        "module.system_info.os.arch",
+                        text(os.os_architecture.as_deref()),
+                    ),
                 ]),
                 Block::badge(if elevated {
                     "common.state.elevated"
@@ -78,18 +113,10 @@ impl Module for SystemInfo {
                     "common.state.userland"
                 }),
             ]),
-            Section::new("module.system_info.section.host").with_blocks(vec![Block::key_values(
-                vec![
-                    KeyValue::new(
-                        "module.system_info.host.manufacturer",
-                        text(&computer.manufacturer),
-                    ),
-                    KeyValue::new("module.system_info.host.model", text(&computer.model)),
-                    KeyValue::new("module.system_info.host.ram_total", ram_total.clone()),
-                    KeyValue::new("module.system_info.host.uptime", format_uptime(uptime_secs)),
-                    KeyValue::new("module.system_info.host.local_time", local_time.clone()),
-                ],
-            )]),
+            Section::new("module.system_info.section.host").with_blocks(vec![
+                Block::key_values(host_rows),
+                Block::note(NoteLevel::Info, "module.system_info.note.hypervisor"),
+            ]),
         ]);
 
         let data = serde_json::json!({
@@ -104,6 +131,9 @@ impl Module for SystemInfo {
                 "manufacturer": computer.manufacturer,
                 "model": computer.model,
                 "ram_total_bytes": computer.total_physical_memory,
+                "hypervisor_present": computer.hypervisor_present,
+                "pc_system_type": computer.pc_system_type,
+                "logical_processors": computer.logical_processors,
             },
             "uptime_secs": uptime_secs,
             "local_time": local_time,
@@ -114,26 +144,19 @@ impl Module for SystemInfo {
     }
 }
 
-fn decode_row<T: serde::de::DeserializeOwned>(
-    rows: &[serde_json::Value],
-    class: &str,
-) -> Result<T> {
-    let row = rows
-        .first()
-        .ok_or_else(|| ModuleError::unavailable(format!("{class}: brak instancji")))?;
-    serde_json::from_value(row.clone())
-        .map_err(|err| ModuleError::provider("WMI", format!("{class}: {err}")))
-}
-
-fn text(value: &Option<String>) -> String {
-    match value {
-        Some(text) if !text.trim().is_empty() => text.clone(),
-        _ => "-".to_string(),
+/// `Win32_ComputerSystem.PCSystemType` — 1 = desktop, 2 = laptop.
+fn system_type_key(code: Option<u16>) -> &'static str {
+    match code {
+        Some(1) => "common.system_type.desktop",
+        Some(2) => "common.system_type.mobile",
+        Some(3) => "common.system_type.workstation",
+        Some(4) => "common.system_type.enterprise_server",
+        Some(5) => "common.system_type.soho_server",
+        Some(6) => "common.system_type.appliance",
+        Some(7) => "common.system_type.performance_server",
+        Some(8) => "common.system_type.slate",
+        _ => "common.value.unknown",
     }
-}
-
-fn format_gib(bytes: u64) -> String {
-    format!("{:.1} GB", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
 }
 
 fn format_uptime(total_secs: u64) -> String {
@@ -153,20 +176,11 @@ mod tests {
         let wmi = MockWmi::new()
             .with_rows(
                 "Win32_OperatingSystem",
-                vec![serde_json::json!({
-                    "Caption": "Microsoft Windows 11 Enterprise",
-                    "Version": "10.0.26300",
-                    "BuildNumber": "26300",
-                    "OSArchitecture": "64-bit"
-                })],
+                fixture_rows!("win32_operatingsystem.json"),
             )
             .with_rows(
                 "Win32_ComputerSystem",
-                vec![serde_json::json!({
-                    "Manufacturer": "ASUSTeK COMPUTER INC.",
-                    "Model": "PRIME B450M-A",
-                    "TotalPhysicalMemory": 34_359_738_368u64
-                })],
+                fixture_rows!("win32_computersystem.json"),
             );
         let host = if elevated {
             MockHost::elevated()
@@ -185,7 +199,19 @@ mod tests {
         assert!(output.view.uses_key("module.system_info.os.caption"));
         assert!(output.view.uses_key("module.system_info.host.ram_total"));
         assert_eq!(output.data["os"]["build_number"], "26300");
-        assert_eq!(output.data["host"]["ram_total_bytes"], 34_359_738_368u64);
+        assert_eq!(output.data["host"]["ram_total_bytes"], 34_281_689_088u64);
+    }
+
+    #[test]
+    fn describes_machine_type_and_hypervisor() {
+        let output = SystemInfo
+            .collect(&harness(true).ctx())
+            .expect("zbieranie danych");
+        assert_eq!(output.data["host"]["pc_system_type"], 1);
+        assert_eq!(output.data["host"]["hypervisor_present"], true);
+        assert!(output.view.uses_key("common.system_type.desktop"));
+        assert!(output.view.uses_key("module.system_info.host.hypervisor"));
+        assert!(output.view.uses_key("module.system_info.note.hypervisor"));
     }
 
     #[test]
@@ -242,8 +268,11 @@ mod tests {
     }
 
     #[test]
-    fn formats_ram_in_gib() {
-        assert_eq!(format_gib(34_359_738_368), "32.0 GB");
-        assert_eq!(format_gib(0), "0.0 GB");
+    fn maps_system_type_codes() {
+        assert_eq!(system_type_key(Some(1)), "common.system_type.desktop");
+        assert_eq!(system_type_key(Some(2)), "common.system_type.mobile");
+        assert_eq!(system_type_key(Some(8)), "common.system_type.slate");
+        assert_eq!(system_type_key(None), "common.value.unknown");
+        assert_eq!(system_type_key(Some(99)), "common.value.unknown");
     }
 }
