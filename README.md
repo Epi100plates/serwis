@@ -2,7 +2,7 @@
 
 Narzędzie serwisowe dla Windows 10/11 x64: diagnostyka sprzętu (jak AIDA64), testy dysków i SMART (jak HD Tune / CrystalDiskInfo) oraz migracja profili przeglądarek między komputerami. Jeden plik `.exe`, praca offline, moduły dokładane przez kontrybutorów.
 
-Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 11 modułów (telemetria AIDA‑lite, wykresy live, SMART dysków NVMe i ATA/SATA) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
+Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 12 modułów (telemetria AIDA‑lite, wykresy live, SMART dysków NVMe i ATA/SATA, benchmark prędkości powierzchni) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
 
 ![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
 
@@ -13,6 +13,10 @@ Stan dysków (SMART) w układzie jak CrystalDiskInfo: stan i temperatura każdeg
 Tabela atrybutów ATA z kolumną „Ocena” — zrzut z makiety (`MockStorage`), bo kontroler SATA tej maszyny nie przekazuje SMART:
 
 ![Tabela atrybutów ATA z oceną — dane syntetyczne](docs/screenshot-smart-ata-synthetic.png)
+
+Benchmark prędkości powierzchni (`storage.bench`) — panel z wyborem dysku i szybkości testu (15 s / 30 s / 60 s / bez limitu). Test próbkuje **cały dysk** i mieści się w wybranym czasie, a wykres od razu ma układ całego nośnika z podziałką w GB. Obok mapy prędkości: czas dostępu 4K i lista nieczytelnych bloków. Test tylko czyta dane, można go anulować:
+
+![Benchmark prędkości dysku — panel i mapa prędkości](docs/screenshot-bench.png)
 
 Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
 
@@ -32,17 +36,18 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 | `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
 | `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
 | `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
+| `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB, wykres rozpięty na cały dysk), prędkość minimalna/średnia/maksymalna, czas dostępu i IOPS losowego odczytu 4K, lista nieczytelnych bloków; wybór dysku i limitu czasu (15 s / 30 s / 60 s / bez limitu), próbkowanie całej powierzchni, Start/Anuluj, tylko odczyt |
 | `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd (stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane), baner oceny, wskaźniki NVMe (zapas bloków, % zużycia, odczyt/zapis, komendy hosta, cykle, błędy medium) lub ATA (temperatura, zużycie, przealokowane/oczekujące/niepoprawne sektory, CRC), **pełna tabela atrybutów ATA z tłumaczonymi nazwami i oceną każdego atrybutu** |
 | `system.info` | wersja systemu, model komputera, RAM, uptime, czas lokalny, typ komputera, hypervisor, uprawnienia |
 | `system.live` | wykresy obciążenia CPU, taktowania i zużycia RAM — próbka co sekundę, historia 10 minut |
 
 Raport: JSON (maszynowy, `schema_version`) i HTML (samodzielny plik, inline SVG, bez JavaScriptu).
 
-SMART wymaga uprawnień administratora (manifest release je zapewnia). Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych.
+SMART i benchmark prędkości wymagają uprawnień administratora (manifest release je zapewnia). Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych. Benchmark bez administratora kończy się czytelnym komunikatem o odmowie dostępu.
 
 ## Zakres (wersja 1.0)
 
-- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt całej powierzchni z mapą prędkości, losowy odczyt 4K, czas dostępu, surface test (odczyt), test zapisu tylko za jawnym potwierdzeniem.
+- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt powierzchni z mapą prędkości, losowy odczyt 4K i czas dostępu (gotowe), surface test (odczyt), test zapisu tylko za jawnym potwierdzeniem.
 - **Migracja:** wykrywanie profili Chrome/Edge/Brave/Firefox, zakładki, historia, ustawienia, hasła w granicach możliwości systemu, zaszyfrowany pakiet `.skpkg`.
 - **Raport:** JSON i HTML (gotowe w Fazie 1).
 
@@ -52,7 +57,7 @@ Czego nie ma i dlaczego: temperatury rdzeni CPU, napięcia i obroty wentylatoró
 
 Rust 1.99 (MSVC) · egui 0.37 / eframe 0.37 / egui_plot 0.38 (GUI, jeden exe, bez Node i WebView2) · `windows` 0.62 · `wmi` 0.18 · `serde` · `clap` · `chrono` · `include_dir` (wkompilowane tłumaczenia). Kolejne fazy dołożą `rusqlite` i `age`.
 
-Struktura: `sk-core` (kontrakt modułów i widoków), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware, dyski i SMART), `sk-modules` (moduły + parsery SMART), `sk-app` (binarka `serwiskit`, raport JSON/HTML).
+Struktura: `sk-core` (kontrakt modułów i widoków, typy benchmarku), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware, dyski i SMART, odczyt powierzchni), `sk-modules` (moduły + parsery SMART + analiza mapy prędkości), `sk-app` (binarka `serwiskit`, raport JSON/HTML, panel i wątek benchmarku).
 
 Wersja release ma manifest `requireAdministrator` — SMART i testy dysków wymagają administratora. Build deweloperski manifestu nie zawiera, żeby `cargo run` nie wywoływał UAC.
 

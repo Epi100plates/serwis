@@ -42,5 +42,22 @@
   "ui.export_html": "Save HTML report",
   "ui.export_saved": "HTML report saved",
   "ui.uptime": "Uptime",
-  "ui.export_failed": "Could not save the report"
+  "ui.export_failed": "Could not save the report",
+  "ui.bench.title": "Drive speed test",
+  "ui.bench.drive": "Drive",
+  "ui.bench.speed": "Test speed",
+  "ui.bench.speed_fast": "Fast (15 s)",
+  "ui.bench.speed_normal": "Standard (30 s)",
+  "ui.bench.speed_precise": "Accurate (60 s)",
+  "ui.bench.speed_unlimited": "No limit",
+  "ui.bench.speed_hint": "The test samples the whole drive within the chosen time — 60 s on a 120 GB drive is the same as on a 2 TB one.",
+  "ui.bench.start": "Start",
+  "ui.bench.cancel": "Cancel",
+  "ui.bench.running": "Test in progress",
+  "ui.bench.finished": "Test finished",
+  "ui.bench.failed": "Test failed",
+  "ui.bench.waiting": "Ready to start",
+  "ui.bench.no_drives": "No drives to test",
+  "ui.bench.progress": "Progress",
+  "ui.bench.current": "Current speed"
 }

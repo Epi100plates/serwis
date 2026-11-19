@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sk_core::i18n::{Locale, Translator};
 use sk_core::module::CollectCtx;
+use sk_core::surface::IdleSurface;
 use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
 
 use crate::report::{self, Report, ReportOptions};
@@ -100,6 +101,9 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
     let machine = WinMachine::new();
     let storage = WinStorage::new();
     let live = sk_core::live::LiveHistory::new(1);
+    // Benchmark nie jest częścią raportu: trwa minuty i wymaga jawnego startu
+    // w GUI, dlatego raport widzi stan bezczynny.
+    let surface = IdleSurface;
     wmi.begin_round();
 
     let ctx = CollectCtx {
@@ -109,6 +113,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         machine: &machine,
         storage: &storage,
         live: &live,
+        surface: &surface,
         locale,
     };
 

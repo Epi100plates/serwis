@@ -8,10 +8,12 @@ mod env;
 mod machine;
 mod registry;
 mod storage;
+mod surface;
 mod wmi;
 
 pub use clock::SystemClock;
 pub use env::WinHostEnv;
 pub use machine::WinMachine;
 pub use storage::WinStorage;
+pub use surface::scan_surface;
 pub use wmi::{CacheStats, QueryCache, WinWmi};

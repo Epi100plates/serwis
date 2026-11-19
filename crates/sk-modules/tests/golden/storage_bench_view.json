@@ -1,0 +1,124 @@
+{
+  "sections": [
+    {
+      "title_key": "module.storage_bench.section",
+      "subtitle": null,
+      "blocks": [
+        {
+          "kind": "status",
+          "label_key": "module.storage_bench.status.label",
+          "value_key": "module.storage_bench.status.complete",
+          "level": "ok"
+        },
+        {
+          "kind": "key_values",
+          "rows": [
+            {
+              "label_key": "module.storage_bench.row.drive",
+              "value": "CT1000MX500SSD1"
+            },
+            {
+              "label_key": "module.storage_bench.row.drive_index",
+              "value": "0"
+            },
+            {
+              "label_key": "module.storage_bench.row.disk_size",
+              "value": "476.9 GB"
+            },
+            {
+              "label_key": "module.storage_bench.row.block",
+              "value": "64 MB"
+            },
+            {
+              "label_key": "module.storage_bench.row.read",
+              "value": "192 MB"
+            },
+            {
+              "label_key": "module.storage_bench.row.covered",
+              "value": "476.9 GB / 476.9 GB"
+            },
+            {
+              "label_key": "module.storage_bench.row.duration",
+              "value": "58.4 s"
+            },
+            {
+              "label_key": "module.storage_bench.row.time_limit",
+              "value": "1 min 00 s"
+            },
+            {
+              "label_key": "module.storage_bench.row.samples",
+              "value": "3"
+            },
+            {
+              "label_key": "module.storage_bench.row.speed_min",
+              "value": "500.0 MB/s"
+            },
+            {
+              "label_key": "module.storage_bench.row.speed_avg",
+              "value": "510.0 MB/s"
+            },
+            {
+              "label_key": "module.storage_bench.row.speed_max",
+              "value": "520.0 MB/s"
+            },
+            {
+              "label_key": "module.storage_bench.row.access_avg",
+              "value": "0.08 ms"
+            },
+            {
+              "label_key": "module.storage_bench.row.access_min",
+              "value": "0.05 ms"
+            },
+            {
+              "label_key": "module.storage_bench.row.access_max",
+              "value": "0.20 ms"
+            },
+            {
+              "label_key": "module.storage_bench.row.iops",
+              "value": "12500 IOPS"
+            },
+            {
+              "label_key": "module.storage_bench.row.random_reads",
+              "value": "200"
+            }
+          ]
+        },
+        {
+          "kind": "chart",
+          "chart": {
+            "title_key": "module.storage_bench.chart.speed",
+            "x_label": "GB",
+            "y_label": "MB/s",
+            "from_zero": true,
+            "x_min": 0.0,
+            "x_max": 476.9358158111572,
+            "series": [
+              {
+                "label": "READ",
+                "points": [
+                  [
+                    0.0,
+                    520.0
+                  ],
+                  [
+                    256.0,
+                    510.0
+                  ],
+                  [
+                    476.8733158111572,
+                    500.0
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "kind": "note",
+          "level": "info",
+          "text_key": "module.storage_bench.note.readonly"
+        }
+      ]
+    }
+  ]
+}

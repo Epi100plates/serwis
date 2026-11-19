@@ -203,7 +203,21 @@ pub struct Chart {
     pub title_key: String,
     pub x_label: String,
     pub y_label: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub from_zero: bool,
+    /// Stały początek osi X; `None` = oś zaczyna się od danych.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_min: Option<f64>,
+    /// Stały koniec osi X. Ustawiony z góry (np. rozmiar dysku w GB), więc
+    /// wykres rysuje się w gotowym układzie, zanim pojawi się choćby jedna
+    /// próbka — zamiast rozciągać się z każdym nowym punktem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_max: Option<f64>,
     pub series: Vec<ChartSeries>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Chart {
@@ -216,8 +230,29 @@ impl Chart {
             title_key: title_key.into(),
             x_label: x_label.into(),
             y_label: y_label.into(),
+            from_zero: false,
+            x_min: None,
+            x_max: None,
             series: Vec::new(),
         }
+    }
+
+    /// Skala osi Y zaczyna się od zera. Dla przepustowości to konieczne —
+    /// bez tego 2 % różnicy między blokami rysuje się jak góra i dolina.
+    pub fn with_zero_base(mut self) -> Self {
+        self.from_zero = true;
+        self
+    }
+
+    /// Ustawia stały zakres osi X. Wykres ma wtedy gotowy układ od pierwszego
+    /// odświeżenia: oś pokazuje całą szerokość (np. cały dysk), a punkty
+    /// dochodzą na swoje miejsce.
+    pub fn with_x_range(mut self, min: f64, max: f64) -> Self {
+        if min.is_finite() && max.is_finite() && max > min {
+            self.x_min = Some(min);
+            self.x_max = Some(max);
+        }
+        self
     }
 
     pub fn with_series(mut self, series: Vec<ChartSeries>) -> Self {
@@ -500,6 +535,21 @@ mod tests {
     }
 
     #[test]
+    fn zero_base_chart_serializes_flag_only_when_set() {
+        let plain = Chart::new("test.chart", "%", "MB/s");
+        assert!(!plain.from_zero);
+        let json = serde_json::to_value(&plain).expect("json");
+        assert!(json.get("from_zero").is_none(), "{json}");
+
+        let chart = Chart::new("test.chart", "%", "MB/s").with_zero_base();
+        assert!(chart.from_zero);
+        let json = serde_json::to_value(&chart).expect("json");
+        assert_eq!(json["from_zero"], true);
+        let back: Chart = serde_json::from_value(json).expect("odczyt wykresu");
+        assert!(back.from_zero);
+    }
+
+    #[test]
     fn empty_chart_is_reported() {
         assert!(Chart::new("test.chart", "s", "%").is_empty());
         assert!(
@@ -507,5 +557,28 @@ mod tests {
                 .with_series(vec![ChartSeries::new("CPU", vec![[0.0, 1.0]])])
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn chart_x_range_is_serialized_only_when_valid() {
+        let plain = Chart::new("test.chart", "GB", "MB/s");
+        let json = serde_json::to_value(&plain).expect("json");
+        assert!(json.get("x_min").is_none(), "{json}");
+        assert!(json.get("x_max").is_none(), "{json}");
+
+        let chart = Chart::new("test.chart", "GB", "MB/s").with_x_range(0.0, 931.5);
+        let json = serde_json::to_value(&chart).expect("json");
+        assert_eq!(json["x_min"], 0.0);
+        assert_eq!(json["x_max"], 931.5);
+        let back: Chart = serde_json::from_value(json).expect("odczyt wykresu");
+        assert_eq!(back.x_max, Some(931.5));
+
+        // Odwrócony albo nierozstrzygalny zakres nie może trafić do modelu —
+        // renderer dostałby oś o ujemnej szerokości.
+        let broken = Chart::new("test.chart", "GB", "MB/s").with_x_range(10.0, 10.0);
+        assert_eq!(broken.x_min, None);
+        assert_eq!(broken.x_max, None);
+        let nan = Chart::new("test.chart", "GB", "MB/s").with_x_range(0.0, f64::NAN);
+        assert_eq!(nan.x_max, None);
     }
 }

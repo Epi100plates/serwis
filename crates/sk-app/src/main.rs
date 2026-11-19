@@ -4,6 +4,7 @@
 //! (raport JSON i/lub HTML). Logika modułów jest wspólna dla obu trybów.
 
 mod app;
+mod bench;
 mod cli;
 mod html;
 mod live;

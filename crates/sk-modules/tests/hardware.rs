@@ -10,7 +10,12 @@
 
 use sk_core::i18n::Locale;
 use sk_core::module::CollectCtx;
+use sk_core::surface::IdleSurface;
 use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
+
+/// Benchmark nie jest uruchamiany w testach sprzętowych — moduł ma pokazać
+/// poprawny stan bezczynny.
+const IDLE: IdleSurface = IdleSurface;
 
 fn ctx_parts() -> (
     WinWmi,
@@ -43,6 +48,7 @@ fn every_hardware_module_reads_real_data() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        surface: &IDLE,
         locale: Locale::Pl,
     };
 
@@ -54,6 +60,7 @@ fn every_hardware_module_reads_real_data() {
         "hw.gpu",
         "hw.monitor",
         "hw.disk_inventory",
+        "storage.bench",
         "system.info",
     ] {
         let module = registry
@@ -86,6 +93,7 @@ fn cpu_memory_and_disks_report_positive_numbers() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        surface: &IDLE,
         locale: Locale::Pl,
     };
 
@@ -136,6 +144,7 @@ fn missing_battery_degrades_instead_of_failing() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        surface: &IDLE,
         locale: Locale::Pl,
     };
 
@@ -161,6 +170,7 @@ fn smart_reports_drives_and_degrades_without_elevation() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        surface: &IDLE,
         locale: Locale::Pl,
     };
 

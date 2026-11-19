@@ -18,6 +18,7 @@ macro_rules! fixture_rows {
     };
 }
 
+mod bench;
 mod edid;
 mod modules;
 mod smart;

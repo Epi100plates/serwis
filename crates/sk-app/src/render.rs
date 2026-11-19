@@ -156,8 +156,22 @@ fn chart_ui(ui: &mut egui::Ui, chart: &Chart, translator: &Translator) {
         .x_axis_label(chart.x_label.clone())
         .y_axis_label(chart.y_label.clone());
 
-    if chart.y_label == "%" {
+    if chart.from_zero || chart.y_label == "%" {
         plot = plot.include_y(0.0);
+    }
+
+    // Stały zakres osi X: wykres ma gotowy układ (np. cały dysk w GB) już przy
+    // pierwszej próbce, zamiast rozciągać się z każdym punktem.
+    if let (Some(min), Some(max)) = (chart.x_min, chart.x_max) {
+        plot = plot.default_x_bounds(min, max);
+        if !chart.x_label.is_empty() {
+            // Wartości bezwzględne (pozycja na dysku) muszą mieć jednostkę
+            // przy każdym znaczniku — „250” na osi nic nie mówi.
+            let unit = chart.x_label.clone();
+            plot = plot.x_axis_formatter(move |mark, _range| format!("{:.0} {unit}", mark.value));
+        }
+    } else if let Some(max) = chart.x_max {
+        plot = plot.include_x(max);
     }
 
     plot.show(ui, |plot_ui| {

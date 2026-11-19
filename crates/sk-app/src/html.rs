@@ -284,7 +284,7 @@ fn chart_svg(chart: &Chart) -> String {
     const HEIGHT: f64 = 180.0;
     const PAD: f64 = 26.0;
 
-    let mut max_x: f64 = 0.0;
+    let mut max_x: f64 = chart.x_max.unwrap_or(0.0);
     let mut max_y: f64 = 0.0;
     let mut any_point = false;
     for series in &chart.series {
@@ -333,6 +333,20 @@ fn chart_svg(chart: &Chart) -> String {
             svg,
             "<line x1=\"{PAD}\" y1=\"{y:.1}\" x2=\"{x2:.1}\" y2=\"{y:.1}\" stroke=\"#f0f2f4\"/>",
             x2 = PAD + plot_width
+        );
+    }
+
+    // Podziałka osi X: pięć równych kroków z wartościami. Przy ustalonym
+    // zakresie (np. cały dysk) raport pokazuje od razu całą szerokość.
+    for step in 0..=4 {
+        let fraction = f64::from(step) / 4.0;
+        let _ = write!(
+            svg,
+            "<text x=\"{x:.1}\" y=\"{y:.1}\" font-size=\"8\" fill=\"#5b6167\" \
+             text-anchor=\"middle\">{:.0}</text>",
+            max_x * fraction,
+            x = PAD + plot_width * fraction,
+            y = PAD + plot_height + 12.0
         );
     }
 
@@ -534,6 +548,21 @@ mod tests {
     fn empty_chart_renders_nothing() {
         let chart = Chart::new("module.system_live.chart.cpu", "s", "%");
         assert!(chart_svg(&chart).is_empty());
+    }
+
+    #[test]
+    fn fixed_x_range_keeps_the_full_disk_scale() {
+        let chart = Chart::new("module.storage_bench.chart.speed", "GB", "MB/s")
+            .with_x_range(0.0, 100.0)
+            .with_series(vec![ChartSeries::new(
+                "READ",
+                vec![[0.0, 500.0], [10.0, 400.0]],
+            )]);
+        let svg = chart_svg(&chart);
+        // 10 GB z 100 GB to 10 % szerokości pola (588 px) — punkt na 84.8 px,
+        // a nie na prawym końcu, jak przy skali dopasowanej do danych.
+        assert!(svg.contains("84.8"), "{svg}");
+        assert!(svg.contains(">100<"), "podziałka osi X: {svg}");
     }
 
     #[test]

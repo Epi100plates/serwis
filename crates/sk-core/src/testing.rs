@@ -13,6 +13,7 @@ use crate::providers::{
     AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SmartData,
     StorageProbe, WmiProvider,
 };
+use crate::surface::{SurfaceSource, SurfaceState};
 
 /// WMI zwracające przygotowane wiersze. Fragment zapytania dopasowuje się do
 /// treści zapytania (np. `"Win32_OperatingSystem"`).
@@ -182,6 +183,29 @@ impl LiveSource for MockLive {
     }
 }
 
+/// Stan testu prędkości powierzchni dla testów — moduł dostaje dokładnie
+/// przygotowany stan (bezczynny, w toku, zakończony albo nieudany).
+#[derive(Debug, Clone, Default)]
+pub struct MockSurface {
+    state: SurfaceState,
+}
+
+impl MockSurface {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_state(state: SurfaceState) -> Self {
+        Self { state }
+    }
+}
+
+impl SurfaceSource for MockSurface {
+    fn state(&self) -> SurfaceState {
+        self.state.clone()
+    }
+}
+
 /// Jeden dysk w makiecie: dane SMART albo błąd, który naprawdę może się zdarzyć.
 #[derive(Debug, Clone)]
 enum MockSmart {
@@ -277,6 +301,7 @@ pub struct Harness {
     pub machine: MockMachine,
     pub live: MockLive,
     pub storage: MockStorage,
+    pub surface: MockSurface,
     pub locale: Locale,
 }
 
@@ -289,6 +314,7 @@ impl Harness {
             machine: MockMachine::new(),
             live: MockLive::new(),
             storage: MockStorage::new(),
+            surface: MockSurface::new(),
             locale: Locale::Pl,
         }
     }
@@ -323,6 +349,11 @@ impl Harness {
         self
     }
 
+    pub fn with_surface(mut self, surface: MockSurface) -> Self {
+        self.surface = surface;
+        self
+    }
+
     pub fn with_locale(mut self, locale: Locale) -> Self {
         self.locale = locale;
         self
@@ -336,6 +367,7 @@ impl Harness {
             machine: &self.machine,
             live: &self.live,
             storage: &self.storage,
+            surface: &self.surface,
             locale: self.locale,
         }
     }

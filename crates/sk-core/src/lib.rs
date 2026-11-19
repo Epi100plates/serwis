@@ -11,6 +11,7 @@ pub mod module;
 pub mod providers;
 pub mod queries;
 pub mod registry;
+pub mod surface;
 pub mod view;
 
 #[cfg(any(test, feature = "testing"))]
@@ -28,6 +29,10 @@ pub mod prelude {
     };
     pub use crate::queries;
     pub use crate::registry::ModuleRegistry;
+    pub use crate::surface::{
+        IdleSurface, SurfaceAccess, SurfaceParams, SurfaceReadError, SurfaceSample, SurfaceScan,
+        SurfaceSource, SurfaceState, SurfaceStore,
+    };
     pub use crate::view::{
         Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, StatusLevel, Table, View,
     };

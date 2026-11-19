@@ -17,10 +17,11 @@ crates/
   sk-modules/              MODUŁY: jeden plik = jeden moduł
     src/edid.rs           parser EDID (czysty Rust, testy na fixtures)
     src/smart.rs          parsery SMART NVMe i ATA oraz ocena stanu (czysty Rust)
+    src/bench.rs          analiza mapy prędkości: statystyki, punkty wykresu, wynik
     src/util.rs           wspólne dekodowanie WMI i formatowanie wartości
     src/modules/mod.rs     lista modułów i rejestracja (dwie linie na moduł)
     src/modules/hw_*.rs    moduły sprzętowe
-    src/modules/storage_*.rs moduły dyskowe (SMART, w kolejce benchmark i surface)
+    src/modules/storage_*.rs moduły dyskowe (SMART, benchmark; surface w kolejce)
     tests/contract.rs      automatyczne testy każdego modułu
     tests/golden.rs        wzorce kształtu widoków (`tests/golden/*.json`)
     tests/hardware.rs      testy sprzętowe `#[ignore]` (prawdziwe WMI, dyski)
@@ -99,6 +100,7 @@ pub struct CollectCtx<'a> {
     pub machine: &'a dyn MachineInfo,  // firmware(), adapter_memory(), display_edid()
     pub storage: &'a dyn StorageProbe, // describe(index), smart(index) — dyski fizyczne (Faza 2)
     pub live: &'a dyn LiveSource,      // samples() — historia telemetrii (Faza 1)
+    pub surface: &'a dyn SurfaceSource, // state() — wynik/stan testu prędkości (Faza 2)
     pub locale: Locale,
 }
 ```
@@ -106,6 +108,8 @@ pub struct CollectCtx<'a> {
 `MachineInfo` istnieje dlatego, że WMI **nie** daje trzech rzeczy: trybu firmware (`GetFirmwareType`), realnego VRAM (`AdapterRAM` jest 32‑bitowe i obcina do 4 GiB) i EDID monitora (tylko rejestr). Wszystkie metody mają domyślne implementacje, więc makieta nie musi ich znać — brak danych jest poprawnym stanem.
 
 `StorageProbe` (Faza 2) daje to, czego WMI nie daje o dyskach: magistralę i rodzaj nośnika z deskryptora urządzenia oraz **surowe** bloki SMART. Implementacja realna (`sk-win/src/storage.rs`) wymaga administratora; makieta (`MockStorage`) podstawia gotowe bajty.
+
+`SurfaceSource` (Faza 2) daje **stan testu prędkości powierzchni**: `Idle`, `Running` (postęp i próbki częściowe), `Done(SurfaceScan)` albo `Failed`. Pomiaru nie wykonuje `collect()` — trwa sekundy lub godziny, więc uruchamia go osobny wątek aplikacji (`sk-app/src/bench.rs`) i zapisuje wynik do `SurfaceStore`. Moduł `storage.bench` tylko czyta ten stan i zamienia go na widok; dzięki temu jest bezstanowy i testowalny przez `MockSurface`. Tryb CLI używa `IdleSurface` — raport pokazuje wtedy objaśnienie zamiast wyniku.
 
 Kolejne fazy rozszerzą kontekst (Faza 3: `dpapi: &dyn Dpapi` do haseł przeglądarek). Rozszerzenie wykonuje lider, nie autor modułu.
 
@@ -147,6 +151,7 @@ pub struct Chart {
     pub title_key: String,             // etykieta wykresu = klucz i18n
     pub x_label: String,               // jednostka osi, np. "s"
     pub y_label: String,               // jednostka osi, np. "%"
+    pub from_zero: bool,               // skala Y od 0 (przepustowość); domyślnie false
     pub series: Vec<ChartSeries>,      // label = dana ("CPU"), points = [x, y]
 }
 ```
@@ -314,7 +319,7 @@ cargo run -p sk-app -- report --json out.json --html out.html --module tools.tim
 
 ## 5. Długie operacje — stan obecny
 
-`TaskDescriptor` (postęp, anulowanie, parametry) jest zaprojektowany, ale **niezaimplementowany** — dochodzi w Fazie 2 razem z benchmarkiem dysku. Do tego czasu:
+`TaskDescriptor` (postęp, anulowanie, parametry) jest zaprojektowany, ale **niezaimplementowany**. Benchmark dysku (`storage.bench`) ma na razie własny, węższy mechanizm: dedykowany wątek + wspólny magazyn wyniku (`SurfaceStore`) + panel sterowania w GUI. Do czasu `TaskDescriptor`:
 
 - moduł nie wykonuje operacji > ~200 ms,
 - jeśli funkcja wymaga dłuższego I/O, to jest to nowy moduł zgłoszony liderowi, a nie „obejście” w `collect()`.
@@ -374,6 +379,31 @@ Reguły, których oczekuje review:
 - **Ocena pojedynczego atrybutu to ta sama reguła, co ocena dysku** (`smart::attribute_state`): przekroczony próg → `Bad`, niezerowy licznik z `SUSPICIOUS_ATTRIBUTE_IDS` → `Warning`, inaczej `Good`. Nie duplikuj tej logiki w module — inaczej kolumna „Ocena” rozjedzie się z banerem.
 - **Liczniki ATA w LBA przeliczaj przez `BytesPerSector`** z `Win32_DiskDrive` (atrybuty 241/242), a nie przez stałe 512 B — dysk 4Kn inaczej pokaże czterokrotnie zaniżone dane.
 
+### 5.3 Benchmark powierzchni — `storage.bench`
+
+Zasada: **transport w `sk-win`, analiza w module, sterowanie w aplikacji**. Odczyt sekwencyjny z `FILE_FLAG_NO_BUFFERING` (bufor, offset i długość wyrównane do 4 KiB) mierzy nośnik, a nie cache systemu:
+
+```rust
+// sk-win/src/surface.rs — jedyne miejsce z ReadFile/SetFilePointerEx
+scan_surface(&params, &cancel, &mut |sample, bytes_read| { /* postęp */ })?;
+// sk-modules/src/bench.rs — czyste funkcje
+bench::stats(&scan); bench::chart_points(&scan.samples); bench::outcome(&scan);
+```
+
+Przebieg ma dwie fazy: próbkowany odczyt całej powierzchni (mapa prędkości) i losowe odczyty 4K (czas dostępu, IOPS). Blok jest dobierany do zakresu tak, żeby próbek było najwyżej `sk_core::surface::MAX_SAMPLES`.
+
+Reguły, których oczekuje review:
+
+- **`collect()` nie mierzy.** Test trwa minuty, więc `scan_surface` woła wątek aplikacji (`sk-app/src/bench.rs`) na jawne „Start”, a moduł czyta `ctx.surface.state()`. Postęp jest w `SurfaceState::Running`, wynik w `Done`.
+- **Test próbkuje cały dysk w limicie czasu.** `SurfaceParams::time_limit_ms` (domyślnie `DEFAULT_TIME_LIMIT_MS` = 60 s, 0 = bez limitu) wyznacza budżet, a `next_sample_offset` dzieli pozostałą odległość przez liczbę kroków, które zmieszczą się w pozostałym czasie — ostatnia próbka trafia na koniec powierzchni. `BenchOutcome::TimeLimit` (status `Ok`, nie ostrzeżenie o dysku) pojawia się tylko wtedy, gdy końca nie udało się objąć; po terminie `sweep` i tak robi jeden skok na ostatni blok.
+- **Bez limitu to pełny odczyt sekwencyjny.** Panel nie ma wyboru zakresu — zawsze cała powierzchnia; różnicę robi wyłącznie szybkość testu (15/30/60 s).
+- **Postęp przy limicie licz z zegara.** `SurfaceState::Running` niesie `elapsed_ms`, a `progress_percent()` przy ustawionym limicie dzieli czas, nie bajty — inaczej pasek utknąłby na kilku procentach i test skończyłby się „niedokończony” z wyglądu.
+- **Anulowanie jest stanem, nie błędem.** Przerwany test zwraca dane częściowe z `cancelled: true`; moduł pokazuje je jako `Warn` („Przerwany”), nie jako brak wyniku.
+- **Nieczytelny blok to dana.** Błędy `ReadFile` trafiają do `SurfaceScan::errors` (limit 128 wpisów) i do tabeli „Pozycja / Błąd”; po 8 błędach pod rząd faza sekwencyjna się zatrzymuje, żeby uszkodzony dysk nie wisiał godzinami.
+- **Brak administratora to degradacja.** `AccessDenied` → `Failed` z komunikatem i notką o uprawnieniach; `collect()` nadal zwraca `Ok`.
+- **Wykres rysuje się w gotowym układzie.** Oś X to pozycja w GB (1 GB = 1024³ B), rozpięta na cały dysk: `Chart::with_zero_base().with_x_range(0.0, dysk_gb)`. Renderer używa `default_x_bounds` + `x_axis_formatter` (podziałka „100 GB”, „200 GB”…), a HTML skaluje SVG do `x_max`. Skala nie zależy od danych, więc wykres jest kompletny od pierwszej próbki; skala Y zawsze od zera, bo kilkuprocentowe różnice wyglądają inaczej jak góry i doliny.
+- **Test sprzętowy akceptuje oba warianty.** `scan_surface` bez podniesienia procesu zwraca `AccessDenied` — test `#[ignore]` ma to przyjąć, a nie zakładać dane.
+
 ---
 
 ## 6. Testy, których oczekuje review
@@ -388,7 +418,7 @@ Reguły, których oczekuje review:
 
 Wzorce golden odświeżasz świadomie: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`, potem commit z opisem, dlaczego widok się zmienił.
 
-Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, MockStorage, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`. `MockStorage` ma `with_nvme`, `with_ata`, `with_denied` (brak administratora) i `with_unavailable` (mostek USB/kontroler RAID).
+Makieta: `sk_core::testing::{Harness, MockWmi, MockMachine, MockLive, MockStorage, MockSurface, FixedClock, MockHost}` — dostępna przez `dev-dependencies` z feature `testing`. `MockWmi` dopasowuje odpowiedź po **najdłuższym** pasującym fragmencie zapytania, więc `Win32_PhysicalMemoryArray` nie zostanie pomylone z `Win32_PhysicalMemory`. `MockStorage` ma `with_nvme`, `with_ata`, `with_denied` (brak administratora) i `with_unavailable` (mostek USB/kontroler RAID); `MockSurface` podstawia `Idle`, `Running`, `Done` albo `Failed`.
 
 ---
 

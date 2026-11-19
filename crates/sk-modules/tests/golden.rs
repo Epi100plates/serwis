@@ -14,7 +14,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use sk_core::providers::{BusKind, DriveKind, PhysicalDrive};
-use sk_core::testing::{Harness, MockStorage, MockWmi};
+use sk_core::surface::{SurfaceAccess, SurfaceParams, SurfaceSample, SurfaceScan, SurfaceState};
+use sk_core::testing::{Harness, MockStorage, MockSurface, MockWmi};
 use sk_core::view::View;
 use sk_modules::registry;
 
@@ -172,4 +173,65 @@ fn storage_smart_view_is_stable() {
         .collect(&storage_harness().ctx())
         .expect("zbieranie danych");
     check("storage_smart_view", &output.view);
+}
+
+/// Syntetyczna mapa prędkości: wartości stałe, żeby wzorzec był deterministyczny.
+/// Prawdziwy pomiar wymaga administratora i dysku, więc nie może być fixture
+/// w CI — tak samo jak bufory SMART.
+///
+/// Przebieg jest rozrzucony po całej powierzchni (0 / 256 GiB / koniec dysku),
+/// bo tak działa próbkowanie z limitem czasu — i to ono ma być w wzorcu.
+fn bench_harness() -> Harness {
+    const DISK_BYTES: u64 = 512_105_932_800;
+    const BLOCK_BYTES: u64 = 64 << 20;
+    let wmi = MockWmi::new().with_rows("Win32_DiskDrive", fixture("win32_diskdrive.json"));
+    let scan = SurfaceScan {
+        params: SurfaceParams {
+            drive: 0,
+            span_bytes: DISK_BYTES,
+            block_bytes: BLOCK_BYTES,
+            random_reads: 200,
+            time_limit_ms: 60_000,
+        },
+        disk_bytes: DISK_BYTES,
+        bytes_read: 3 * BLOCK_BYTES,
+        duration_ms: 58_400,
+        samples: vec![
+            SurfaceSample {
+                offset_bytes: 0,
+                speed_mbps: 520.0,
+            },
+            SurfaceSample {
+                offset_bytes: 256 << 30,
+                speed_mbps: 510.0,
+            },
+            SurfaceSample {
+                offset_bytes: DISK_BYTES - BLOCK_BYTES,
+                speed_mbps: 500.0,
+            },
+        ],
+        errors: Vec::new(),
+        access: Some(SurfaceAccess {
+            reads: 200,
+            avg_ms: 0.08,
+            min_ms: 0.05,
+            max_ms: 0.2,
+            iops: 12_500.0,
+        }),
+        cancelled: false,
+        time_limit_reached: false,
+    };
+    Harness::new()
+        .with_wmi(wmi)
+        .with_surface(MockSurface::with_state(SurfaceState::Done(scan)))
+}
+
+#[test]
+fn storage_bench_view_is_stable() {
+    let registry = registry();
+    let module = registry.find("storage.bench").expect("moduł storage.bench");
+    let output = module
+        .collect(&bench_harness().ctx())
+        .expect("zbieranie danych");
+    check("storage_bench_view", &output.view);
 }

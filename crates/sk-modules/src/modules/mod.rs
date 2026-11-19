@@ -16,6 +16,7 @@ mod hw_disk_inventory;
 mod hw_gpu;
 mod hw_memory;
 mod hw_monitor;
+mod storage_bench;
 mod storage_smart;
 mod system_info;
 mod system_live;
@@ -29,6 +30,7 @@ pub(crate) fn register(registry: &mut ModuleRegistry) {
     registry.add::<hw_gpu::Gpu>();
     registry.add::<hw_memory::Memory>();
     registry.add::<hw_monitor::Monitor>();
+    registry.add::<storage_bench::StorageBench>();
     registry.add::<storage_smart::StorageSmart>();
     registry.add::<system_info::SystemInfo>();
     registry.add::<system_live::Live>();
