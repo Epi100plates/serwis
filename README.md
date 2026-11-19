@@ -59,7 +59,7 @@ Rust 1.99 (MSVC) · egui 0.37 / eframe 0.37 / egui_plot 0.38 (GUI, jeden exe, be
 
 Struktura: `sk-core` (kontrakt modułów i widoków, typy benchmarku), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware, dyski i SMART, odczyt powierzchni), `sk-modules` (moduły + parsery SMART + analiza mapy prędkości), `sk-app` (binarka `serwiskit`, raport JSON/HTML, panel i wątek benchmarku).
 
-Wersja release ma manifest `requireAdministrator` — SMART i testy dysków wymagają administratora. Build deweloperski manifestu nie zawiera, żeby `cargo run` nie wywoływał UAC.
+Wersja release ma manifest `requireAdministrator` — SMART i testy dysków wymagają administratora. Build deweloperski manifestu nie zawiera, żeby `cargo run` nie wywoływał UAC. Wydanie startuje też **bez okna konsoli** (podsystem GUI): podwójne kliknięcie otwiera tylko okno aplikacji. `cargo run` zostaje przy konsoli, żeby widzieć `--help` i komunikaty błędów.
 
 ## Budowanie
 
@@ -77,6 +77,8 @@ Wymagania: Rust (toolchain MSVC) + Visual Studio Build Tools. Tryb headless:
 ```
 
 `--json` i `--html` można łączyć; dane zbierane są raz, więc oba pliki są spójne.
+
+Tryb `report` w wydaniu dołącza do konsoli, z której go uruchomiono, więc wydruk „Raport zapisany…” trafia do tego samego okna (przekierowanie `> log.txt` działa jak zwykle). Jeśli proces został podniesiony przez UAC i nie ma konsoli rodzica, otwiera własną — tak jak dotąd. Gdy uruchomisz `report` z Eksploratora, okno konsoli pojawi się tylko na czas zbierania raportu. Powłoka nie czeka na proces GUI: w skrypcie użyj `Start-Process -Wait` (PowerShell) albo `start /wait` (cmd).
 
 Bramki jakości (wszystkie muszą być zielone):
 

@@ -4,6 +4,7 @@
 //! Moduły nie wołają API systemowego bezpośrednio — dostają traity z `sk-core`.
 
 mod clock;
+mod console;
 mod env;
 mod machine;
 mod registry;
@@ -12,6 +13,7 @@ mod surface;
 mod wmi;
 
 pub use clock::SystemClock;
+pub use console::{ensure_console, show_error};
 pub use env::WinHostEnv;
 pub use machine::WinMachine;
 pub use storage::WinStorage;

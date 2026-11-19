@@ -158,6 +158,23 @@ Moduł.collect(ctx) ──► ModuleOutput { data: serde_json::Value, view: View
 
 Długie operacje (benchmark, surface, kopiowanie profilu) nie są `collect()`: to `TaskDescriptor` z `run(&TaskCtx)` w wątku roboczym, `Progress` przez kanał `std::sync::mpsc` + `ctx.request_repaint()`, anulowanie przez `AtomicBool`. UI nigdy nie blokuje się na I/O.
 
+### 4.7 Start bez okna konsoli (decyzja 2026‑11‑19)
+
+Okno cmd, które otwierało się obok GUI, nie pochodziło z kodu — Windows tworzy je dla **każdego** exe z podsystemem konsoli. Dopóki `serwiskit.exe` był takim exe, podwójne kliknięcie dawało dwa okna.
+
+Warianty:
+
+- A: zostawić podsystem konsoli i ukrywać okno, gdy proces jest jedynym właścicielem konsoli (`GetConsoleProcessList` + `ShowWindow`). Odrzucone: okno zdąży mrugnąć, a ukrycie konsoli odziedziczonej po `cmd` ukryłoby terminal użytkownika.
+- B: dwa exe (GUI + `serwiskit-cli.exe`). Odrzucone: dwa artefakty przy obietnicy „jeden plik `.exe`” i duplikacja argumentów.
+- **C (wybrany):** podsystem GUI tylko w wydaniu — `#![cfg_attr(all(windows, not(debug_assertions), not(test)), windows_subsystem = "windows")]` w `sk-app/src/main.rs`.
+
+Konsekwencje, które kod obsługuje:
+
+1. **Build deweloperski zostaje przy konsoli** — `cargo run`, `--help` i komunikaty paniki są widoczne, a `cargo test` nie zmienia podsystemu binarnego celu testowego.
+2. **Tryb CLI sam dba o wyjście** (`sk_win::ensure_console`): najpierw sprawdza, czy `stdout`/`stderr` już mają uchwyty (przekierowanie `> log.txt` — nic nie zmienia), potem dołącza do konsoli wywołującego, a gdy to się nie uda (proces podniesiony przez UAC nie ma konsoli rodzica) tworzy własną przez `AllocConsole`.
+3. **Błąd, którego nie ma gdzie wypisać, trafia do okienka** (`sk_win::show_error` → `MessageBoxW`) — dotyczy ścieżki GUI w wydaniu. Kod GUI nie może używać `println!`/`eprintln!`: bez konsoli makra panikują na błędzie zapisu, dlatego `main` wybiera okienko, gdy konsoli nie ma.
+4. **Powłoki nie czekają na proces GUI tak jak na konsolowy.** W teście na tej maszynie PowerShell wrócił z promptem natychmiast (`Start-Process -Wait` czeka poprawnie); `cmd.exe` zachowuje się tak samo i wymaga `start /wait`. Raport i tak powstaje — asynchroniczny jest tylko prompt.
+
 ---
 
 ## 5. Funkcje → źródło danych → uprawnienia → faza

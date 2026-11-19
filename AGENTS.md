@@ -67,6 +67,10 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 
 - `eframe` 0.37 domyślnie używa **wgpu** (nie glow). Wariant `default-features = false, features = ["glow", ...]` jest o ~7 MB mniejszy, ale wymaga sprawnego OpenGL — decyzja architektoniczna, nie „optymalizacja”.
 - Manifest `requireAdministrator` wchodzi tylko w release przez `/MANIFESTUAC` w `build.rs`. Plik `.manifest` + `/MANIFESTINPUT` daje błąd `manifest authoring error` (konflikt z domyślnym fragmentem linkera).
+- **Wydanie startuje bez okna konsoli** — w `sk-app/src/main.rs` jest `#![cfg_attr(all(windows, not(debug_assertions), not(test)), windows_subsystem = "windows")]`. Każdy exe z podsystemem konsoli dostaje od Windows własne okno cmd obok GUI, dlatego podsystem zmienia się dopiero w release (build deweloperski ma konsolę: `cargo run`, paniki, testy).
+  - Tryb CLI (`serwiskit report …`) dba o wyjście sam: `sk_win::ensure_console()` dołącza do konsoli wywołującego, a gdy to się nie uda (proces podniesiony przez UAC nie ma konsoli rodzica) tworzy własną (`AllocConsole`). Uchwyty przekierowane do pliku (`> log.txt`) zostają nietknięte.
+  - Błąd startu GUI w release pokazuje `sk_win::show_error` (`MessageBoxW`). **Nie dodawaj `println!`/`eprintln!` w ścieżce GUI** — w wydaniu nie ma konsoli, a makra panikują na błędzie zapisu; `tracing` bez zainstalowanego subscribera jest bezpieczny.
+  - Sprawdzenie podsystemu w gotowym exe: `[BitConverter]::ToUInt16($bytes, $pe + 24 + 0x44)` — `2` = GUI, `3` = konsola.
 - Bez administratora: `\\.\PhysicalDriveN` → `Odmowa dostępu`, `Get-StorageReliabilityCounter` → brak dostępu do CIM. Inwentarz WMI działa bez admina.
 - `Win32_VideoController.AdapterRAM` obcina VRAM do 4 GiB (uint32) — potwierdzone na RX 6700 XT 12 GB. VRAM bierz z DXGI/rejestru.
 - Klasy, których nie ma / nie zwracają danych: `Win32_ProcessorPowerManagement` (nie istnieje), `MSAcpi_ThermalZoneTemperature` (na tej maszynie brak), `Win32_Fan` (brak instancji), `Win32_Battery` (desktop — 0 instancji; baterię testuj na fixture'ach).
