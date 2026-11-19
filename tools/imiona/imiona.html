@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Imiona w Polsce 2000–2019 — wyszukiwarka</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --ink:#111827; --muted:#667085; --line:#e4e7ec;
+    --accent:#2563eb; --accent-soft:#e8efff; --m:#2563eb; --k:#c026d3;
+    --bad:#b42318; --good:#087443; --chip:#f2f4f7;
+    --radius:12px; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1014; --card:#161920; --ink:#e7e9ef; --muted:#98a1b0; --line:#262a33;
+      --accent:#7aa2ff; --accent-soft:#1b2740; --m:#7aa2ff; --k:#e879f9;
+      --bad:#f97066; --good:#47cd89; --chip:#1e222b;
+      --shadow:0 1px 2px rgba(0,0,0,.5);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:14px/1.5 "Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  .top{padding:18px 22px 10px;border-bottom:1px solid var(--line);background:var(--card)}
+  .top h1{margin:0;font-size:19px;letter-spacing:-.01em}
+  .top h1 span{color:var(--muted);font-weight:500}
+  .top p{margin:4px 0 0;color:var(--muted);font-size:12.5px;max-width:110ch}
+  .layout{display:grid;grid-template-columns:296px minmax(0,1fr);gap:16px;padding:16px 22px 60px;align-items:start}
+  @media (max-width:900px){
+    .layout{grid-template-columns:minmax(0,1fr)}
+    #panel{position:static!important;max-height:none;overflow:visible;display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+    #panel .actions{grid-column:1 / -1}
+  }
+  @media (max-width:560px){ #panel{grid-template-columns:minmax(0,1fr)} }
+
+  /* ---------- panel filtrów ---------- */
+  #panel{
+    position:sticky;top:12px;background:var(--card);border:1px solid var(--line);
+    border-radius:var(--radius);box-shadow:var(--shadow);padding:12px;max-height:calc(100vh - 24px);overflow:auto
+  }
+  .fgroup{margin-bottom:11px}
+  .fgroup:last-child{margin-bottom:0}
+  .flabel{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .row{display:flex;gap:8px;align-items:center}
+  .row>*{min-width:0}
+  select,input[type=search],input[type=number]{
+    width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);
+    color:var(--ink);font:inherit;font-size:13px
+  }
+  select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 15px) 13px,calc(100% - 10px) 13px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:26px}
+  input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{
+    flex:1;border:0;background:transparent;color:var(--muted);padding:7px 4px;font:inherit;font-size:12.5px;cursor:pointer
+  }
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .presets button,#reset,#export,.dir{
+    border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;
+    padding:4px 10px;font:inherit;font-size:11.5px;cursor:pointer
+  }
+  .presets button:hover,#reset:hover,#export:hover,.dir:hover{border-color:var(--accent);color:var(--accent)}
+  .dir{width:34px;padding:6px 0;flex:0 0 auto;border-radius:8px;font-size:14px;line-height:1}
+  .actions{display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .actions button{flex:1;border-radius:8px;padding:7px 8px;font-size:12.5px}
+  .fcheck label{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--ink);cursor:pointer}
+  .fcheck input{margin:0}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+
+  /* ---------- wyniki ---------- */
+  main{min-width:0}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;box-shadow:var(--shadow);min-width:120px}
+  .stat b{display:block;font-size:17px;letter-spacing:-.01em}
+  .stat span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px}
+  .cardhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .cardhead h2{margin:0;font-size:13.5px;font-weight:600}
+  .cardhead .hint{font-size:11.5px;color:var(--muted)}
+  #chartWrap{position:relative;padding:10px 10px 0;min-height:320px}
+  #chart svg{display:block;width:100%}
+  .axis text{fill:var(--muted);font-size:11px}
+  .axis line{stroke:var(--line)}
+  .grid line{stroke:var(--line);stroke-dasharray:2 3}
+  .tip{
+    position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line);
+    border-radius:8px;box-shadow:0 6px 18px rgba(16,24,40,.18);padding:8px 10px;font-size:12px;
+    opacity:0;transition:opacity .1s;z-index:5;min-width:120px;max-width:220px
+  }
+  .tip.on{opacity:1}
+  .tip b{display:block;margin-bottom:4px;font-size:12px}
+  .tip .trow{display:flex;justify-content:space-between;gap:10px}
+  .tip .trow i{font-style:normal;color:var(--muted)}
+  .legend{display:flex;flex-wrap:wrap;gap:4px 12px;padding:8px 16px 14px}
+  .legend button{
+    display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--ink);
+    font:inherit;font-size:12px;cursor:pointer;padding:2px 0;opacity:.95
+  }
+  .legend button.off{opacity:.35;text-decoration:line-through}
+  .legend .sw{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+
+  .tablewrap{overflow:auto;max-height:min(66vh,720px)}
+  table{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}
+  thead th{
+    position:sticky;top:0;background:var(--card);z-index:2;text-align:right;font-size:11px;font-weight:600;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--line);
+    white-space:nowrap;cursor:pointer;user-select:none
+  }
+  thead th:hover{color:var(--accent)}
+  thead th.ar[aria-sort]::after{content:"";display:inline-block;margin-left:4px;border:4px solid transparent;vertical-align:middle}
+  thead th[aria-sort=descending]::after{border-top-color:var(--accent);margin-top:3px}
+  thead th[aria-sort=ascending]::after{border-bottom-color:var(--accent);margin-bottom:3px}
+  thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3){text-align:left}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  tbody td:nth-child(1),tbody td:nth-child(2),tbody td:nth-child(3){text-align:left}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:var(--chip)}
+  tbody tr.sel{background:var(--accent-soft)}
+  tbody tr.sel td{border-bottom-color:var(--accent-soft)}
+  .rk{color:var(--muted);font-size:12px;width:34px}
+  .nm{font-weight:600}
+  .badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;background:var(--chip);color:var(--muted)}
+  .badge.M{color:var(--m);background:color-mix(in srgb,var(--m) 12%,transparent)}
+  .badge.K{color:var(--k);background:color-mix(in srgb,var(--k) 12%,transparent)}
+  .up{color:var(--good)} .down{color:var(--bad)} .flat{color:var(--muted)}
+  .spark{display:block;margin-left:auto;overflow:visible}
+  .empty{padding:34px;text-align:center;color:var(--muted)}
+  .err{margin:40px auto;max-width:640px;padding:18px;border:1px solid var(--bad);border-radius:10px;color:var(--bad)}
+
+  /* ---------- panel szczegółów ---------- */
+  #scrim{position:fixed;inset:0;background:rgba(8,12,20,.32);opacity:0;pointer-events:none;transition:opacity .16s;z-index:15}
+  #scrim.open{opacity:1;pointer-events:auto}
+  #drawer{
+    position:fixed;top:0;right:0;height:100%;width:min(430px,94vw);background:var(--card);
+    border-left:1px solid var(--line);box-shadow:-10px 0 30px rgba(16,24,40,.18);
+    transform:translateX(102%);transition:transform .18s ease;z-index:20;overflow:auto;padding:16px 16px 40px
+  }
+  #drawer.open{transform:none}
+  .dhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+  .dhead h2{margin:0;font-size:20px;letter-spacing:-.01em}
+  .dhead .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .close{border:0;background:transparent;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
+  .close:hover{color:var(--ink);background:var(--chip)}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .kv span{color:var(--muted)}
+  .kv b{font-variant-numeric:tabular-nums}
+  .dsec{margin:18px 0 8px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .dtable{width:100%;font-size:12.5px;border-collapse:collapse}
+  .dtable th{text-align:right;color:var(--muted);font-weight:600;font-size:11px;padding:4px 6px;border-bottom:1px solid var(--line)}
+  .dtable th:first-child{text-align:left}
+  .dtable td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .dtable td:first-child{text-align:left;color:var(--muted)}
+  .dtable .barcell{width:42%;position:relative}
+  .dtable .bar{height:7px;border-radius:3px;background:var(--accent);opacity:.75;min-width:2px}
+  .dtable tr.peak td{color:var(--ink);font-weight:600}
+  .dtable tr.peak .bar{background:var(--accent);opacity:1}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Imiona w Polsce <span>2000–2019</span></h1>
+  <p>
+    Wyszukiwarka imion nadawanych dzieciom w Polsce — dane GUS z serwisu
+    <a href="https://dane.gov.pl/pl/dataset/219/resource/21458" target="_blank" rel="noopener">dane.gov.pl</a>,
+    pole „imię pierwsze”, z podziałem na płeć. <span id="dataInfo"></span>
+  </p>
+</header>
+
+<div class="layout">
+  <aside id="panel" aria-label="Filtry">
+    <div class="fgroup">
+      <label class="flabel">Płeć</label>
+      <div class="seg" id="sex" role="group" aria-label="Płeć">
+        <button type="button" data-v="all" aria-pressed="true">Wszystkie</button>
+        <button type="button" data-v="M" aria-pressed="false">Chłopcy</button>
+        <button type="button" data-v="K" aria-pressed="false">Dziewczynki</button>
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="from">Zakres lat</label>
+      <div class="row">
+        <select id="from" aria-label="Rok od"></select>
+        <span style="color:var(--muted)">–</span>
+        <select id="to" aria-label="Rok do"></select>
+      </div>
+      <div class="presets">
+        <button type="button" data-preset="all">2000–2019</button>
+        <button type="button" data-preset="decade">2010–2019</button>
+        <button type="button" data-preset="last5">2015–2019</button>
+        <button type="button" data-preset="y2019">tylko 2019</button>
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="q">Imię</label>
+      <input id="q" type="search" placeholder="np. jakub, zofia, an" autocomplete="off" spellcheck="false" />
+      <div class="row" style="margin-top:6px">
+        <select id="mode" aria-label="Sposób dopasowania">
+          <option value="contains">zawiera</option>
+          <option value="starts">zaczyna się od</option>
+          <option value="exact">dokładnie</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="minSum">Min. liczba nadań w okresie</label>
+      <input id="minSum" type="number" min="0" step="50" value="0" />
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="minYears">Min. lat obecności: <b id="minYearsOut">0</b></label>
+      <input id="minYears" type="range" min="0" max="20" step="1" value="0" />
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="topN">Kiedykolwiek w TOP</label>
+      <select id="topN" title="Ranking liczony osobno dla chłopców i dziewczynek w każdym roku">
+        <option value="0">bez limitu</option>
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="trend">Trend w okresie</label>
+      <select id="trend">
+        <option value="any">dowolny</option>
+        <option value="up">rosnący (ponad +20%)</option>
+        <option value="flat">stabilny (±20%)</option>
+        <option value="down">malejący (poniżej −20%)</option>
+      </select>
+    </div>
+
+    <div class="fgroup fcheck">
+      <label for="onlyNew">
+        <input type="checkbox" id="onlyNew" />
+        <span>tylko imiona nowe po <b id="onlyNewYear">2000</b></span>
+      </label>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="sort">Sortowanie</label>
+      <div class="row">
+        <select id="sort">
+          <option value="sum">suma nadań</option>
+          <option value="avg">średnia na rok</option>
+          <option value="peak">rekord w roku</option>
+          <option value="trend">trend</option>
+          <option value="years">liczba lat obecności</option>
+          <option value="name">alfabetycznie</option>
+          <option value="first">pierwsze nadanie</option>
+          <option value="last">ostatnie nadanie</option>
+        </select>
+        <button type="button" class="dir" id="dir" title="Zmień kierunek sortowania" aria-label="Kierunek sortowania">↓</button>
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <label class="flabel" for="limit">Liczba wyników</label>
+      <select id="limit">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+        <option value="0">wszystkie</option>
+      </select>
+    </div>
+
+    <div class="actions">
+      <button type="button" id="reset">Wyczyść filtry</button>
+      <button type="button" id="export">Eksport CSV</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="stats" id="stats"></div>
+
+    <section class="card">
+      <div class="cardhead">
+        <h2 id="chartTitle">Rozkład w czasie — TOP 10 wyników</h2>
+        <div class="hint" id="chartHint">najedź kursorem, aby odczytać wartości</div>
+      </div>
+      <div id="chartWrap"><div id="chart"></div><div class="tip" id="tip"></div></div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <section class="card">
+      <div class="tablewrap">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="ar" data-sort="name" scope="col">Imię</th>
+              <th>Płeć</th>
+              <th class="ar" data-sort="sum" scope="col">Suma</th>
+              <th class="ar" data-sort="avg" scope="col">Śr./rok</th>
+              <th class="ar" data-sort="peak" scope="col">Rekord</th>
+              <th class="ar" data-sort="trend" scope="col">Trend</th>
+              <th class="ar" data-sort="years" scope="col">Lata</th>
+              <th style="text-align:right">Przebieg</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="scrim"></div>
+<aside id="drawer" aria-label="Szczegóły imienia" aria-hidden="true"></aside>
+
+<noscript><p style="padding:20px">Ta wyszukiwarka wymaga włączonego JavaScriptu.</p></noscript>
+
+<script src="imiona-data.js" charset="utf-8"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+
+  var RAW = window.IMIONA;
+  if (!RAW || !RAW.rows || !RAW.rows.length) {
+    document.body.innerHTML =
+      '<p class="err">Nie udało się wczytać danych (<code>imiona-data.js</code>). ' +
+      'Plik musi leżeć obok <code>imiona.html</code>. Wygeneruj go poleceniem ' +
+      '<code>powershell -ExecutionPolicy Bypass -File tools\\imiona\\build.ps1</code>.</p>';
+    return;
+  }
+
+  var YEARS = RAW.years.slice();
+  var NY = YEARS.length;
+  var YI = {};
+  YEARS.forEach(function (y, i) { YI[y] = i; });
+
+  var PL = { 'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z' };
+  function norm(s) { return s.toLowerCase().replace(/[ąćęłńóśźż]/g, function (c) { return PL[c]; }); }
+
+  function fmt(n) { return Number(n).toLocaleString('pl-PL'); }
+  function pct(v) { return (v > 0 ? '+' : '') + v.toFixed(0) + '%'; }
+
+  // ---------- przygotowanie danych ----------
+  var ROWS = RAW.rows.map(function (r) {
+    var counts = r[2], total = 0;
+    for (var i = 0; i < counts.length; i++) total += counts[i];
+    return { name: r[0], sex: r[1], counts: counts, total: total, key: r[0] + '|' + r[1], norm: norm(r[0]) };
+  });
+
+  var rankOf = {};          // "yi|sex" -> Map(name -> pozycja)
+  var sexTotal = {};        // "yi|sex" -> suma nadań w roku
+  (function initAggregates() {
+    for (var yi = 0; yi < NY; yi++) {
+      ['M', 'K'].forEach(function (sex) {
+        var sum = 0, list = [];
+        for (var k = 0; k < ROWS.length; k++) {
+          var r = ROWS[k];
+          if (r.sex !== sex) continue;
+          var c = r.counts[yi];
+          if (c > 0) { sum += c; list.push(r); }
+        }
+        list.sort(function (a, b) { return b.counts[yi] - a.counts[yi]; });
+        var m = new Map();
+        for (var j = 0; j < list.length; j++) m.set(list[j].name, j + 1);
+        rankOf[yi + '|' + sex] = m;
+        sexTotal[yi + '|' + sex] = sum;
+      });
+    }
+  })();
+
+  function rankAt(row, yi) {
+    var m = rankOf[yi + '|' + row.sex];
+    return m ? (m.get(row.name) || 0) : 0;
+  }
+
+  // ---------- stan ----------
+  var DEFAULTS = {
+    sex: 'all', from: YEARS[0], to: YEARS[NY - 1], q: '', mode: 'contains',
+    minSum: 0, minYears: 0, topN: 0, trend: 'any', onlyNew: false,
+    sort: 'sum', dir: -1, limit: 50
+  };
+  var state = Object.assign({}, DEFAULTS);
+
+  var SORT_DEFAULT_DIR = { sum: -1, avg: -1, peak: -1, trend: -1, years: -1, name: 1, first: 1, last: -1 };
+
+  // ---------- filtrowanie ----------
+  function matchToken(name, token) {
+    if (state.mode === 'exact') return name === token;
+    if (state.mode === 'starts') return name.indexOf(token) === 0;
+    return name.indexOf(token) !== -1;
+  }
+
+  function compute() {
+    var i0 = YI[state.from], i1 = YI[state.to];
+    if (i0 == null) i0 = 0;
+    if (i1 == null) i1 = NY - 1;
+    if (i1 < i0) { var t = i0; i0 = i1; i1 = t; }
+
+    var tokens = state.q.trim()
+      ? state.q.split(',').map(function (t) { return norm(t.trim()); }).filter(Boolean)
+      : [];
+
+    var out = [];
+    for (var k = 0; k < ROWS.length; k++) {
+      var r = ROWS[k];
+      if (state.sex !== 'all' && r.sex !== state.sex) continue;
+      if (tokens.length) {
+        var hit = false;
+        for (var ti = 0; ti < tokens.length; ti++) {
+          if (matchToken(r.norm, tokens[ti])) { hit = true; break; }
+        }
+        if (!hit) continue;
+      }
+
+      var sum = 0, n = 0, peak = 0, peakY = -1, first = -1, last = -1;
+      for (var yi = i0; yi <= i1; yi++) {
+        var c = r.counts[yi];
+        if (c > 0) {
+          sum += c; n++;
+          if (c > peak) { peak = c; peakY = yi; }
+          if (first < 0) first = yi;
+          last = yi;
+        }
+      }
+      if (sum === 0) continue;
+      if (sum < state.minSum) continue;
+      if (n < state.minYears) continue;
+
+      if (state.topN) {
+        var best = Infinity;
+        for (var y2 = i0; y2 <= i1; y2++) {
+          if (r.counts[y2] > 0) {
+            var rk = rankAt(r, y2);
+            if (rk && rk < best) best = rk;
+          }
+        }
+        if (best > state.topN) continue;
+      }
+
+      var absFirst = -1;
+      for (var y3 = 0; y3 < NY; y3++) { if (r.counts[y3] > 0) { absFirst = y3; break; } }
+      if (state.onlyNew && absFirst <= i0) continue;
+
+      var trend = (first >= 0 && last > first && r.counts[first] > 0)
+        ? (r.counts[last] - r.counts[first]) / r.counts[first] * 100
+        : null;
+
+      if (state.trend === 'up' && !(trend !== null && trend > 20)) continue;
+      if (state.trend === 'down' && !(trend !== null && trend < -20)) continue;
+      if (state.trend === 'flat' && !(trend !== null && Math.abs(trend) <= 20)) continue;
+
+      out.push({
+        row: r, sum: sum, n: n, peak: peak, peakY: peakY,
+        first: first, last: last, trend: trend, absFirst: absFirst,
+        avg: n ? sum / n : 0
+      });
+    }
+
+    // komparatory rosnace; kierunek (rosnaco/malejaco) ustawia state.dir
+    var cmp = {
+      sum: function (a, b) { return a.sum - b.sum; },
+      avg: function (a, b) { return a.avg - b.avg; },
+      peak: function (a, b) { return a.peak - b.peak; },
+      trend: function (a, b) {
+        var x = a.trend === null ? -1e9 : a.trend, y = b.trend === null ? -1e9 : b.trend;
+        return x - y;
+      },
+      years: function (a, b) { return a.n - b.n; },
+      name: function (a, b) { return a.row.name.localeCompare(b.row.name, 'pl'); },
+      first: function (a, b) { return a.absFirst - b.absFirst; },
+      last: function (a, b) { return a.last - b.last; }
+    }[state.sort];
+
+    out.sort(function (a, b) { return state.dir * cmp(a, b) || b.sum - a.sum; });
+
+    return { i0: i0, i1: i1, rows: out, total: out.length };
+  }
+
+  // ---------- wykres ----------
+  var PALETTE = ['#2563eb', '#c026d3', '#0891b2', '#ea580c', '#16a34a', '#dc2626',
+                 '#7c3aed', '#ca8a04', '#0d9488', '#db2777'];
+  var chartHidden = new Set();
+  var chartGeo = null;
+
+  function drawChart(res) {
+    var host = $('#chart'), legend = $('#legend');
+    var W = Math.max(320, host.clientWidth || 640), H = 320;
+    var pad = { l: 58, r: 14, t: 14, b: 30 };
+    var i0 = res.i0, i1 = res.i1;
+
+    var series = res.rows.slice().sort(function (a, b) { return b.sum - a.sum; }).slice(0, 10);
+
+    $('#chartTitle').textContent = (i0 === i1
+      ? 'Ranking roku ' + YEARS[i0]
+      : 'Rozkład w czasie ' + YEARS[i0] + '–' + YEARS[i1]) +
+      ' — TOP ' + series.length + (series.length === 1 ? ' wynik' : ' wyników');
+
+    legend.innerHTML = series.map(function (s, i) {
+      return '<button type="button" data-key="' + s.row.key + '" class="' + (chartHidden.has(s.row.key) ? 'off' : '') + '">' +
+             '<span class="sw" style="background:' + PALETTE[i % PALETTE.length] + '"></span>' +
+             s.row.name + ' <span style="color:var(--muted)">(' + (s.row.sex === 'M' ? 'ch' : 'dz') + ')</span></button>';
+    }).join('');
+
+    if (!series.length) {
+      host.innerHTML = '<div class="empty">Brak wyników dla wybranych filtrów.</div>';
+      chartGeo = null;
+      return;
+    }
+
+    var maxV = 1;
+    series.forEach(function (s) {
+      for (var yi = i0; yi <= i1; yi++) if (s.row.counts[yi] > maxV) maxV = s.row.counts[yi];
+    });
+    var nice = niceMax(maxV);
+
+    var plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+    function x(i) { return i1 === i0 ? pad.l + plotW / 2 : pad.l + (i - i0) / (i1 - i0) * plotW; }
+    function y(v) { return pad.t + plotH - (v / nice) * plotH; }
+
+    var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="Wykres popularności imion w czasie">'];
+
+    // siatka + osie
+    var ticks = 4;
+    svg.push('<g class="grid">');
+    for (var t = 0; t <= ticks; t++) {
+      var v = nice * t / ticks, yy = y(v).toFixed(1);
+      svg.push('<line x1="' + pad.l + '" x2="' + (W - pad.r) + '" y1="' + yy + '" y2="' + yy + '"/>');
+    }
+    svg.push('</g><g class="axis">');
+    for (var t2 = 0; t2 <= ticks; t2++) {
+      var v2 = nice * t2 / ticks;
+      svg.push('<text x="' + (pad.l - 8) + '" y="' + (y(v2) + 4).toFixed(1) + '" text-anchor="end">' + fmt(v2) + '</text>');
+    }
+    var step = (i1 - i0) > 12 ? 2 : 1;
+    for (var yi = i0; yi <= i1; yi++) {
+      if ((yi - i0) % step !== 0 && yi !== i1) continue;
+      svg.push('<text x="' + x(yi).toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle">' + YEARS[yi] + '</text>');
+    }
+    svg.push('<line x1="' + pad.l + '" x2="' + (W - pad.r) + '" y1="' + (pad.t + plotH) + '" y2="' + (pad.t + plotH) + '"/>');
+    svg.push('<line id="guide" x1="0" x2="0" y1="' + pad.t + '" y2="' + (pad.t + plotH) + '" stroke="var(--muted)" stroke-dasharray="3 3" opacity="0"/>');
+    svg.push('</g>');
+
+    series.forEach(function (s, si) {
+      if (chartHidden.has(s.row.key)) return;
+      var color = PALETTE[si % PALETTE.length];
+      if (i1 === i0) {
+        var v = s.row.counts[i0];
+        if (v > 0) svg.push('<circle cx="' + x(i0).toFixed(1) + '" cy="' + y(v).toFixed(1) + '" r="4" fill="' + color + '"/>');
+      } else {
+        var seg = [], segs = [];
+        for (var yj = i0; yj <= i1; yj++) {
+          var cv = s.row.counts[yj];
+          if (cv > 0) seg.push([x(yj), y(cv)]);
+          else if (seg.length) { segs.push(seg); seg = []; }
+        }
+        if (seg.length) segs.push(seg);
+        segs.forEach(function (sg) {
+          if (sg.length === 1) {
+            svg.push('<circle cx="' + sg[0][0].toFixed(1) + '" cy="' + sg[0][1].toFixed(1) + '" r="3" fill="' + color + '"/>');
+          } else {
+            svg.push('<polyline fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="' +
+                     sg.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ') + '"/>');
+          }
+        });
+      }
+    });
+
+    svg.push('</svg>');
+    host.innerHTML = svg.join('');
+    chartGeo = { i0: i0, i1: i1, pad: pad, W: W, H: H, series: series, x: x, y: y };
+  }
+
+  function niceMax(v) {
+    if (v <= 10) return 10;
+    var p = Math.pow(10, Math.floor(Math.log10(v)));
+    var m = v / p;
+    var step = m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10;
+    return step * p;
+  }
+
+  // podpowiedź przy kursorze
+  (function initTip() {
+    var wrap = $('#chartWrap'), tip = $('#tip');
+    wrap.addEventListener('mousemove', function (e) {
+      if (!chartGeo) return;
+      var host = $('#chart'), rect = host.getBoundingClientRect();
+      var g = chartGeo, mx = e.clientX - rect.left;
+      var plotW = g.W - g.pad.l - g.pad.r;
+      var ratio = g.i1 === g.i0 ? 0 : (mx - g.pad.l) / plotW;
+      var idx = Math.round(g.i0 + Math.max(0, Math.min(1, ratio)) * (g.i1 - g.i0));
+      var guide = $('#guide');
+      if (guide) {
+        guide.setAttribute('x1', g.x(idx).toFixed(1));
+        guide.setAttribute('x2', g.x(idx).toFixed(1));
+        guide.setAttribute('opacity', '1');
+      }
+      var items = g.series
+        .filter(function (s) { return !chartHidden.has(s.row.key); })
+        .map(function (s) { return { name: s.row.name, sex: s.row.sex, v: s.row.counts[idx] }; })
+        .filter(function (s) { return s.v > 0; })
+        .sort(function (a, b) { return b.v - a.v; })
+        .slice(0, 6);
+      tip.innerHTML = '<b>' + YEARS[idx] + '</b>' + items.map(function (s) {
+        return '<div class="trow"><i>' + s.name + '</i><span>' + fmt(s.v) + '</span></div>';
+      }).join('') + (items.length ? '' : '<div class="trow" style="color:var(--muted)">brak nadań</div>');
+      tip.classList.add('on');
+      var left = Math.min(mx + 14, wrap.clientWidth - tip.offsetWidth - 6);
+      tip.style.left = Math.max(4, left) + 'px';
+      tip.style.top = Math.max(4, e.clientY - rect.top - 10) + 'px';
+    });
+    wrap.addEventListener('mouseleave', function () {
+      tip.classList.remove('on');
+      var guide = $('#guide');
+      if (guide) guide.setAttribute('opacity', '0');
+    });
+    $('#legend').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-key]');
+      if (!b) return;
+      var k = b.getAttribute('data-key');
+      if (chartHidden.has(k)) chartHidden.delete(k); else chartHidden.add(k);
+      b.classList.toggle('off');
+      if (lastRes) drawChart(lastRes);
+    });
+  })();
+
+  // ---------- tabela ----------
+  function sparkSVG(counts, i0, i1, w, h) {
+    var n = i1 - i0 + 1, max = 1;
+    for (var i = i0; i <= i1; i++) if (counts[i] > max) max = counts[i];
+    var stepX = n > 1 ? (w - 2) / (n - 1) : 0;
+    var segs = [], seg = [];
+    for (var yi = i0; yi <= i1; yi++) {
+      var c = counts[yi];
+      if (c > 0) seg.push([1 + (yi - i0) * stepX, h - 2 - (c / max) * (h - 4)]);
+      else if (seg.length) { segs.push(seg); seg = []; }
+    }
+    if (seg.length) segs.push(seg);
+    var out = '<svg class="spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" aria-hidden="true">';
+    segs.forEach(function (sg) {
+      if (sg.length === 1) {
+        out += '<circle cx="' + sg[0][0].toFixed(1) + '" cy="' + sg[0][1].toFixed(1) + '" r="1.6" fill="var(--accent)"/>';
+      } else {
+        out += '<polyline fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" points="' +
+               sg.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ') + '"/>';
+      }
+    });
+    return out + '</svg>';
+  }
+
+  var SORT_LABEL = { sum: 'suma', avg: 'średnia', peak: 'rekord', trend: 'trend', years: 'lata', name: 'imię', first: 'pierwsze nadanie', last: 'ostatnie nadanie' };
+
+  function renderTable(res) {
+    var tbody = $('#tbody');
+    var limit = state.limit === 0 ? res.rows.length : Math.min(state.limit, res.rows.length);
+    if (!limit) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">Brak imion spełniających kryteria — poluzuj filtry.</td></tr>';
+      return;
+    }
+    var html = [];
+    for (var i = 0; i < limit; i++) {
+      var r = res.rows[i], row = r.row;
+      var trendCls = r.trend === null ? 'flat' : (r.trend > 0 ? 'up' : 'down');
+      var trendTxt = r.trend === null ? '—' : (r.trend > 0 ? '▲ ' : '▼ ') + Math.abs(r.trend).toFixed(0) + '%';
+      html.push(
+        '<tr data-key="' + row.key + '" tabindex="0">' +
+        '<td class="rk">' + (i + 1) + '</td>' +
+        '<td class="nm">' + row.name + '</td>' +
+        '<td><span class="badge ' + row.sex + '">' + (row.sex === 'M' ? 'chłopiec' : 'dziewczynka') + '</span></td>' +
+        '<td>' + fmt(r.sum) + '</td>' +
+        '<td>' + fmt(Math.round(r.avg)) + '</td>' +
+        '<td>' + fmt(r.peak) + ' <span style="color:var(--muted);font-size:12px">' + YEARS[r.peakY] + '</span></td>' +
+        '<td class="' + trendCls + '">' + trendTxt + '</td>' +
+        '<td>' + r.n + '/' + (res.i1 - res.i0 + 1) + '</td>' +
+        '<td>' + sparkSVG(row.counts, res.i0, res.i1, 80, 22) + '</td>' +
+        '</tr>');
+    }
+    tbody.innerHTML = html.join('');
+  }
+
+  function renderStats(res) {
+    var total = res.rows.reduce(function (a, b) { return a + b.sum; }, 0);
+    var shown = state.limit === 0 ? res.rows.length : Math.min(state.limit, res.rows.length);
+    var sexLbl = state.sex === 'M' ? 'chłopcy' : state.sex === 'K' ? 'dziewczynki' : 'obie płcie';
+    $('#stats').innerHTML =
+      '<div class="stat"><b>' + fmt(res.rows.length) + '</b><span>imion w wyniku</span></div>' +
+      '<div class="stat"><b>' + fmt(total) + '</b><span>nadań razem</span></div>' +
+      '<div class="stat"><b>' + YEARS[res.i0] + '–' + YEARS[res.i1] + '</b><span>' + sexLbl + '</span></div>' +
+      '<div class="stat"><b>' + fmt(shown) + '</b><span>wierszy w tabeli</span></div>';
+  }
+
+  function syncSortHeaders() {
+    var ths = document.querySelectorAll('#tbl thead th[data-sort]');
+    for (var i = 0; i < ths.length; i++) {
+      var th = ths[i];
+      if (th.getAttribute('data-sort') === state.sort) {
+        th.setAttribute('aria-sort', state.dir === 1 ? 'ascending' : 'descending');
+      } else {
+        th.removeAttribute('aria-sort');
+      }
+    }
+    $('#dir').textContent = state.dir === 1 ? '↑' : '↓';
+  }
+
+  // ---------- szczegóły ----------
+  var selectedKey = null;
+
+  function openDetail(key) {
+    var row = null;
+    for (var i = 0; i < ROWS.length; i++) if (ROWS[i].key === key) { row = ROWS[i]; break; }
+    if (!row) return;
+    selectedKey = key;
+
+    var i0 = YI[state.from], i1 = YI[state.to];
+    if (i1 < i0) { var t = i0; i0 = i1; i1 = t; }
+
+    var total = 0, bestRank = Infinity, bestRankYear = -1, peak = 0, peakYear = -1, yearsCount = 0;
+    for (var yi = i0; yi <= i1; yi++) {
+      var c = row.counts[yi];
+      if (c > 0) {
+        total += c; yearsCount++;
+        if (c > peak) { peak = c; peakYear = yi; }
+        var rk = rankAt(row, yi);
+        if (rk && rk < bestRank) { bestRank = rk; bestRankYear = yi; }
+      }
+    }
+
+    var sexAll = 0;
+    for (var y2 = i0; y2 <= i1; y2++) sexAll += sexTotal[y2 + '|' + row.sex];
+
+    var rowsHtml = '';
+    for (var y3 = i1; y3 >= i0; y3--) {
+      var cc = row.counts[y3];
+      var share = sexTotal[y3 + '|' + row.sex] ? (cc / sexTotal[y3 + '|' + row.sex] * 100) : 0;
+      var rank = rankAt(row, y3);
+      var w = peak ? (cc / peak * 100) : 0;
+      rowsHtml += '<tr' + (y3 === peakYear && cc > 0 ? ' class="peak"' : '') + '>' +
+        '<td>' + YEARS[y3] + '</td>' +
+        '<td>' + (cc ? fmt(cc) : '—') + '</td>' +
+        '<td>' + (rank ? '#' + rank : '—') + '</td>' +
+        '<td>' + (share ? share.toFixed(2) + '%' : '—') + '</td>' +
+        '<td class="barcell">' + (cc > 0 ? '<div class="bar" style="width:' + Math.max(2, w).toFixed(1) + '%"></div>' : '') + '</td>' +
+        '</tr>';
+    }
+
+    var d = $('#drawer');
+    d.innerHTML =
+      '<div class="dhead">' +
+        '<div><h2>' + row.name + '</h2>' +
+          '<div class="sub"><span class="badge ' + row.sex + '">' + (row.sex === 'M' ? 'chłopiec' : 'dziewczynka') + '</span> ' +
+          'pierwsze nadanie: ' + YEARS[row.counts.findIndex(function (c) { return c > 0; })] + '</div></div>' +
+        '<button type="button" class="close" id="dclose" aria-label="Zamknij">×</button>' +
+      '</div>' +
+      '<div class="kv"><span>Suma ' + YEARS[i0] + '–' + YEARS[i1] + '</span><b>' + fmt(total) + '</b></div>' +
+      '<div class="kv"><span>Średnio na rok</span><b>' + fmt(Math.round(yearsCount ? total / yearsCount : 0)) + '</b></div>' +
+      '<div class="kv"><span>Rekord</span><b>' + fmt(peak) + ' <span style="color:var(--muted);font-weight:400">(' + (peakYear >= 0 ? YEARS[peakYear] : '—') + ')</span></b></div>' +
+      '<div class="kv"><span>Najlepszy ranking</span><b>' + (bestRank < Infinity ? '#' + bestRank : '—') +
+        ' <span style="color:var(--muted);font-weight:400">(' + (bestRankYear >= 0 ? YEARS[bestRankYear] : '—') + ')</span></b></div>' +
+      '<div class="kv"><span>Udział w płci, cały okres</span><b>' + (sexAll ? (total / sexAll * 100).toFixed(2) + '%' : '—') + '</b></div>' +
+      '<div class="kv"><span>Lata z nadaniami</span><b>' + yearsCount + ' / ' + (i1 - i0 + 1) + '</b></div>' +
+      '<div class="dsec">Rok po roku</div>' +
+      '<table class="dtable"><thead><tr><th>Rok</th><th>Liczba</th><th>Ranking</th><th>Udział</th><th></th></tr></thead>' +
+      '<tbody>' + rowsHtml + '</tbody></table>';
+
+    d.classList.add('open');
+    d.setAttribute('aria-hidden', 'false');
+    $('#scrim').classList.add('open');
+    var closeBtn = $('#dclose');
+    if (closeBtn) closeBtn.addEventListener('click', closeDetail);
+    document.querySelectorAll('#tbody tr').forEach(function (tr) {
+      tr.classList.toggle('sel', tr.getAttribute('data-key') === key);
+    });
+  }
+
+  function closeDetail() {
+    selectedKey = null;
+    $('#drawer').classList.remove('open');
+    $('#drawer').setAttribute('aria-hidden', 'true');
+    $('#scrim').classList.remove('open');
+    document.querySelectorAll('#tbody tr.sel').forEach(function (tr) { tr.classList.remove('sel'); });
+  }
+
+  // ---------- eksport ----------
+  function exportCsv() {
+    var res = compute();
+    var limit = state.limit === 0 ? res.rows.length : Math.min(state.limit, res.rows.length);
+    var head = ['Imię', 'Płeć', 'Suma', 'Śr./rok'];
+    for (var yi = res.i0; yi <= res.i1; yi++) head.push(YEARS[yi]);
+    var lines = [head.join(';')];
+    for (var i = 0; i < limit; i++) {
+      var r = res.rows[i], cells = [r.row.name, r.row.sex, r.sum, Math.round(r.avg)];
+      for (var y2 = res.i0; y2 <= res.i1; y2++) cells.push(r.row.counts[y2]);
+      lines.push(cells.join(';'));
+    }
+    var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'imiona-' + YEARS[res.i0] + '-' + YEARS[res.i1] + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // ---------- synchronizacja z formularzem ----------
+  var lastRes = null;
+
+  function render(full) {
+    var res = compute();
+    lastRes = res;
+    renderStats(res);
+    renderTable(res);
+    if (full !== false) drawChart(res);
+    syncSortHeaders();
+    if (selectedKey) openDetail(selectedKey);   // panel szczegółów musi nadążyć za filtrami
+    saveHash();
+    return res;
+  }
+
+  function syncControls() {
+    document.querySelectorAll('#sex button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-v') === state.sex));
+    });
+    $('#from').value = String(state.from);
+    $('#to').value = String(state.to);
+    $('#q').value = state.q;
+    $('#mode').value = state.mode;
+    $('#minSum').value = String(state.minSum);
+    $('#minYears').value = String(state.minYears);
+    $('#minYearsOut').textContent = state.minYears + '/' + NY;
+    $('#topN').value = String(state.topN);
+    $('#trend').value = state.trend;
+    $('#onlyNew').checked = state.onlyNew;
+    $('#onlyNewYear').textContent = state.from;
+    $('#sort').value = state.sort;
+    $('#limit').value = String(state.limit);
+  }
+
+  function saveHash() {
+    var p = [];
+    ['sex', 'from', 'to', 'q', 'mode', 'minSum', 'minYears', 'topN', 'trend', 'sort', 'dir', 'limit'].forEach(function (k) {
+      var v = state[k], d = DEFAULTS[k];
+      if (v === d || v === '' ) return;
+      p.push(k + '=' + encodeURIComponent(v));
+    });
+    if (state.onlyNew) p.push('onlyNew=1');
+    var h = p.join('&');
+    try { history.replaceState(null, '', h ? '#' + h : location.pathname + location.search); }
+    catch (e) { /* file:// w części przeglądarek blokuje replaceState — ignorujemy */ }
+  }
+
+  function loadHash() {
+    var h = location.hash.replace(/^#/, '');
+    if (!h) return;
+    h.split('&').forEach(function (kv) {
+      var i = kv.indexOf('=');
+      if (i < 0) return;
+      var k = kv.slice(0, i), v = decodeURIComponent(kv.slice(i + 1));
+      if (k === 'onlyNew') { state.onlyNew = v === '1'; return; }
+      if (!(k in DEFAULTS)) return;
+      if (typeof DEFAULTS[k] === 'number') {
+        var n = parseInt(v, 10);
+        if (!isNaN(n)) state[k] = n;
+      } else state[k] = v;
+    });
+    if (state.from > state.to) { var t = state.from; state.from = state.to; state.to = t; }
+  }
+
+  // ---------- podłączenie zdarzeń ----------
+  function init() {
+    // listy lat
+    var fo = $('#from'), to = $('#to');
+    YEARS.forEach(function (y) {
+      fo.insertAdjacentHTML('beforeend', '<option value="' + y + '">' + y + '</option>');
+      to.insertAdjacentHTML('beforeend', '<option value="' + y + '">' + y + '</option>');
+    });
+
+    loadHash();
+    syncControls();
+
+    document.querySelectorAll('#sex button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.sex = b.getAttribute('data-v');
+        syncControls(); render();
+      });
+    });
+
+    $('#from').addEventListener('change', function () {
+      state.from = parseInt(this.value, 10);
+      if (state.from > state.to) state.to = state.from;
+      syncControls(); render();
+    });
+    $('#to').addEventListener('change', function () {
+      state.to = parseInt(this.value, 10);
+      if (state.to < state.from) state.from = state.to;
+      syncControls(); render();
+    });
+
+    document.querySelectorAll('[data-preset]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var p = b.getAttribute('data-preset');
+        if (p === 'all') { state.from = YEARS[0]; state.to = YEARS[NY - 1]; }
+        if (p === 'decade') { state.from = YEARS[Math.max(0, NY - 10)]; state.to = YEARS[NY - 1]; }
+        if (p === 'last5') { state.from = YEARS[Math.max(0, NY - 5)]; state.to = YEARS[NY - 1]; }
+        if (p === 'y2019') { state.from = state.to = YEARS[NY - 1]; }
+        syncControls(); render();
+      });
+    });
+
+    var tId = null;
+    $('#q').addEventListener('input', function () {
+      var v = this.value;
+      clearTimeout(tId);
+      tId = setTimeout(function () { state.q = v; render(); }, 140);
+    });
+    $('#mode').addEventListener('change', function () { state.mode = this.value; render(); });
+
+    $('#minSum').addEventListener('input', function () {
+      var n = parseInt(this.value, 10);
+      state.minSum = isNaN(n) || n < 0 ? 0 : n;
+      render();
+    });
+    $('#minYears').addEventListener('input', function () {
+      state.minYears = parseInt(this.value, 10) || 0;
+      $('#minYearsOut').textContent = state.minYears + '/' + NY;
+      render();
+    });
+
+    $('#topN').addEventListener('change', function () { state.topN = parseInt(this.value, 10) || 0; render(); });
+    $('#trend').addEventListener('change', function () { state.trend = this.value; render(); });
+    $('#onlyNew').addEventListener('change', function () { state.onlyNew = this.checked; render(); });
+
+    $('#sort').addEventListener('change', function () {
+      state.sort = this.value;
+      state.dir = SORT_DEFAULT_DIR[state.sort] || -1;
+      render();
+    });
+    $('#dir').addEventListener('click', function () { state.dir *= -1; render(); });
+    $('#limit').addEventListener('change', function () { state.limit = parseInt(this.value, 10); render(); });
+
+    document.querySelectorAll('#tbl thead th[data-sort]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var k = th.getAttribute('data-sort');
+        if (state.sort === k) state.dir *= -1;
+        else { state.sort = k; state.dir = SORT_DEFAULT_DIR[k] || -1; }
+        syncControls(); render();
+      });
+    });
+
+    $('#tbody').addEventListener('click', function (e) {
+      var tr = e.target.closest('tr[data-key]');
+      if (tr) openDetail(tr.getAttribute('data-key'));
+    });
+    $('#tbody').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var tr = e.target.closest('tr[data-key]');
+      if (!tr) return;
+      e.preventDefault();
+      openDetail(tr.getAttribute('data-key'));
+    });
+
+    $('#scrim').addEventListener('click', closeDetail);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeDetail();
+      if (e.key === '/' && document.activeElement !== $('#q')) {
+        e.preventDefault();
+        $('#q').focus();
+        $('#q').select();
+      }
+    });
+
+    $('#reset').addEventListener('click', function () {
+      state = Object.assign({}, DEFAULTS);
+      chartHidden.clear();
+      closeDetail();
+      syncControls(); render();
+    });
+    $('#export').addEventListener('click', exportCsv);
+
+    var rId = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(rId);
+      rId = setTimeout(function () { if (lastRes) drawChart(lastRes); }, 120);
+    });
+
+    $('#dataInfo').textContent = 'W zbiorze: ' + fmt(ROWS.length) + ' rekordów imię–płeć, ' +
+      fmt(RAW.records) + ' wierszy danych, lata ' + YEARS[0] + '–' + YEARS[NY - 1] + '.';
+
+    render(true);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
