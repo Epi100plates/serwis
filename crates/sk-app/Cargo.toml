@@ -22,6 +22,9 @@ tracing.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_plot.workspace = true
+# Zapis zrzutu wykresu (PNG). Wersja już w grafie zależności przez `egui`
+# (dekodowanie obrazów), więc nie dokłada nowego kodu do wydania.
+png = "=0.18.1"
 
 [dev-dependencies]
 sk-core = { path = "../sk-core", features = ["testing"] }

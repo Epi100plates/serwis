@@ -32,7 +32,10 @@ use windows::Win32::System::Ioctl::{GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGT
 /// Bierzemy rozmiar bloku fazy losowej z `sk_core` (4 KiB): jest wielokrotnością
 /// zarówno sektora 512 B, jak i 4Kn, a jednocześnie to dokładnie ten odczyt,
 /// którym mierzymy czas dostępu.
-const ALIGNMENT: usize = RANDOM_BLOCK_BYTES as usize;
+///
+/// Wartość czyta także `sector.rs` (skan jednostek ma te same wymagania
+/// wyrównania).
+pub(crate) const ALIGNMENT: usize = RANDOM_BLOCK_BYTES as usize;
 
 /// Twardy limit wpisów błędów. Mapa powierzchni potrzebuje miejsca na próbki,
 /// a dysk sypiący błędami nie może wyczerpać pamięci procesu.
@@ -329,10 +332,14 @@ fn sweep(
 /// Własny, minimalny typ zamiast `storage::DeviceHandle`: tamten otwiera dysk
 /// do zapisu (SMART) i zna IOCTL-e, a ten potrzebuje tylko odczytu
 /// sekwencyjnego i losowego.
-struct RawDevice(HANDLE);
+///
+/// Typ i jego metody są widoczne w crate, bo korzysta z nich `sector.rs` (skan
+/// nieczytelnych jednostek) — łącznie z polem uchwytu, żeby testy w `sector.rs`
+/// mogły podstawić uchwyt do pliku tymczasowego.
+pub(crate) struct RawDevice(pub(crate) HANDLE);
 
 impl RawDevice {
-    fn open(index: u32) -> Result<Self> {
+    pub(crate) fn open(index: u32) -> Result<Self> {
         let path = format!("\\\\.\\PhysicalDrive{index}");
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -363,7 +370,7 @@ impl RawDevice {
     /// zwróci zero albo błąd — `IOCTL_DISK_GET_LENGTH_INFO`, dokumentowane
     /// zapytanie o rozmiar dysku fizycznego. Bez rozmiaru nie da się przyciąć
     /// zakresu, więc brak obu odpowiedzi jest błędem, nie zgadywaniem.
-    fn size(&self) -> Result<u64> {
+    pub(crate) fn size(&self) -> Result<u64> {
         let mut size = 0i64;
         // SAFETY: `size` to żywa zmienna na stosie, a uchwyt jest otwarty
         // (zamknięcie dopiero w `Drop`).
@@ -405,7 +412,7 @@ impl RawDevice {
         })
     }
 
-    fn seek(&self, offset: u64) -> Result<()> {
+    pub(crate) fn seek(&self, offset: u64) -> Result<()> {
         let distance = i64::try_from(offset).map_err(|_| {
             ModuleError::provider("SetFilePointerEx", format!("offset {offset} poza zakresem"))
         })?;
@@ -418,7 +425,7 @@ impl RawDevice {
     }
 
     /// Jeden `ReadFile`; zwraca liczbę faktycznie odczytanych bajtów.
-    fn read(&self, buffer: &mut [u8]) -> Result<u32> {
+    pub(crate) fn read(&self, buffer: &mut [u8]) -> Result<u32> {
         let mut read = 0u32;
         // SAFETY: `buffer` jest żywy, ma długość co najmniej sektora i zaczyna
         // się pod adresem wyrównanym do `ALIGNMENT` (patrz `alignment_offset`)
@@ -452,8 +459,9 @@ fn timed_read(device: &RawDevice, offset: u64, buffer: &mut [u8]) -> Result<(u32
 /// `FILE_FLAG_NO_BUFFERING` odrzuca odczyt, którego bufor, offset lub długość
 /// nie są wielokrotnością rozmiaru sektora. `Vec<u8>` nie ma gwarantowanego
 /// wyrównania, więc rezerwujemy [`ALIGNMENT`] bajtów zapasu i liczymy początek
-/// z adresu — zwykła arytmetyka na `usize`, bez `unsafe`.
-fn alignment_offset(address: usize) -> usize {
+/// z adresu — zwykła arytmetyka na `usize`, bez `unsafe`. Ten sam rachunek
+/// powtarza `sector.rs`.
+pub(crate) fn alignment_offset(address: usize) -> usize {
     match address % ALIGNMENT {
         0 => 0,
         misalign => ALIGNMENT - misalign,

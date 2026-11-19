@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::live::LiveSample;
+use crate::sensors::{SensorReading, SensorSample};
 
 /// Przestrzeń nazw WMI z inwentarzem sprzętu i systemu.
 pub const NS_CIMV2: &str = "ROOT\\CIMV2";
@@ -71,6 +72,23 @@ pub trait MachineInfo: Send + Sync {
 /// dzięki temu moduł pozostaje bezstanowy.
 pub trait LiveSource: Send + Sync {
     fn samples(&self) -> Vec<LiveSample>;
+}
+
+/// Bieżące odczyty czujników i ich historia. Transport (ADL/NVML/WMI) jest
+/// w `sk-win`, a próbki zbiera wątek roboczy aplikacji — moduł tylko je czyta.
+///
+/// Domyślne implementacje zwracają pusty zestaw: brak czujników na tej maszynie
+/// jest poprawnym stanem, a nie błędem.
+pub trait SensorsSource: Send + Sync {
+    /// Odczyty z ostatniej próbki.
+    fn readings(&self) -> Vec<SensorReading> {
+        Vec::new()
+    }
+
+    /// Próbki od otwarcia modułu — do minimum, maksimum i średniej.
+    fn history(&self) -> Vec<SensorSample> {
+        Vec::new()
+    }
 }
 
 /// Magistrala, do której podłączony jest dysk (`STORAGE_BUS_TYPE`).

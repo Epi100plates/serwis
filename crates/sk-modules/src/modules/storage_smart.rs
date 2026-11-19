@@ -7,7 +7,9 @@
 use serde::Deserialize;
 use sk_core::prelude::*;
 
-use crate::smart::{self, AtaAttribute, Health, KNOWN_ATTRIBUTE_IDS, NvmeHealth, attribute_state};
+use crate::smart::{
+    self, AtaAttribute, Health, KNOWN_ATTRIBUTE_IDS, NvmeHealth, ata_temperature, attribute_state,
+};
 use crate::util::{boolean_key, decode_all, format_bytes, number, text, trimmed};
 
 /// Wszystkie napędy z WMI — ten sam zestaw pól czyta `hw.disk_inventory`,
@@ -758,17 +760,6 @@ fn health_name(health: Option<Health>) -> Option<&'static str> {
         Some(Health::Bad) => Some("bad"),
         None => None,
     }
-}
-
-/// Temperatura z atrybutów ATA: 194 (temperatura dysku) albo 190 (przepływ
-/// powietrza). Surowe bajty niskie to stopnie Celsjusza (ze znakiem); zero
-/// oznacza brak pomiaru, nie 0 °C.
-fn ata_temperature(attributes: &[AtaAttribute]) -> Option<i16> {
-    [194u8, 190]
-        .iter()
-        .find_map(|id| ata_raw(attributes, *id))
-        .map(|raw| i16::from(raw as u8 as i8))
-        .filter(|temperature| *temperature != 0 && (-20..=120).contains(temperature))
 }
 
 fn ata_raw(attributes: &[AtaAttribute], id: u8) -> Option<u64> {

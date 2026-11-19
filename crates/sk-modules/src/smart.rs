@@ -242,6 +242,25 @@ impl AtaAttribute {
     }
 }
 
+/// Temperatura z atrybutów ATA: 194 (temperatura dysku) albo 190 (temperatura
+/// przepływu powietrza). Surowe bajty niskie to stopnie Celsjusza ze znakiem;
+/// zero oznacza brak pomiaru, nie 0 °C.
+///
+/// Wspólne dla `storage.smart` i `hw.sensors` — jedna reguła, żeby oba moduły
+/// pokazywały tę samą temperaturę tego samego dysku.
+pub fn ata_temperature(attributes: &[AtaAttribute]) -> Option<i16> {
+    [194u8, 190]
+        .iter()
+        .find_map(|id| {
+            attributes
+                .iter()
+                .find(|attribute| attribute.id == *id)
+                .map(|attribute| attribute.raw)
+        })
+        .map(|raw| i16::from(raw as u8 as i8))
+        .filter(|temperature| *temperature != 0 && (-20..=120).contains(temperature))
+}
+
 /// Parsuje sektor atrybutów ATA SMART (`SMART READ DATA`).
 ///
 /// Układ: bajt 0 = rewizja, bajt 1 = rezerwa, od bajtu 2 trzydzieści wpisów

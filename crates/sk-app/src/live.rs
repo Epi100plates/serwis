@@ -1,6 +1,7 @@
-//! Próbkowanie telemetrii dla modułu `system.live`.
+//! Próbkowanie telemetrii dla modułów `system.live` i `hw.sensors`.
 //!
-//! Próbka jest zbierana w wątku roboczym i dopisywana do [`LiveHistory`].
+//! Próbka jest zbierana w wątku roboczym i dopisywana do [`LiveHistory`]
+//! (obciążenie/taktowanie/RAM) oraz do `SensorStore` (czujniki GPU/ACPI/baterii).
 //! Pojedynczy błąd licznika nie przerywa próbkowania — w próbce zostaje `None`,
 //! a szczegół trafia do logu diagnostycznego.
 

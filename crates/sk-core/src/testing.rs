@@ -10,9 +10,11 @@ use crate::i18n::Locale;
 use crate::live::LiveSample;
 use crate::module::CollectCtx;
 use crate::providers::{
-    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SmartData,
-    StorageProbe, WmiProvider,
+    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SensorsSource,
+    SmartData, StorageProbe, WmiProvider,
 };
+use crate::sector::{SectorSource, SectorState};
+use crate::sensors::{SensorReading, SensorSample};
 use crate::surface::{SurfaceSource, SurfaceState};
 
 /// WMI zwracające przygotowane wiersze. Fragment zapytania dopasowuje się do
@@ -183,6 +185,45 @@ impl LiveSource for MockLive {
     }
 }
 
+/// Czujniki dla testów — moduł dostaje dokładnie podane odczyty i historię.
+///
+/// Domyślnie brak czujników, więc makieta bez konfiguracji zachowuje się jak
+/// maszyna bez sterownika GPU i bez stref ACPI: moduł pokazuje notkę, nie błąd.
+#[derive(Debug, Clone, Default)]
+pub struct MockSensors {
+    samples: Vec<SensorSample>,
+}
+
+impl MockSensors {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Jedna próbka — tyle wystarczy do tabeli; statystyki będą puste.
+    pub fn with_readings(mut self, readings: Vec<SensorReading>) -> Self {
+        self.samples = vec![SensorSample::new(0.0, readings)];
+        self
+    }
+
+    pub fn with_samples(mut self, samples: Vec<SensorSample>) -> Self {
+        self.samples = samples;
+        self
+    }
+}
+
+impl SensorsSource for MockSensors {
+    fn readings(&self) -> Vec<SensorReading> {
+        self.samples
+            .last()
+            .map(|sample| sample.readings.clone())
+            .unwrap_or_default()
+    }
+
+    fn history(&self) -> Vec<SensorSample> {
+        self.samples.clone()
+    }
+}
+
 /// Stan testu prędkości powierzchni dla testów — moduł dostaje dokładnie
 /// przygotowany stan (bezczynny, w toku, zakończony albo nieudany).
 #[derive(Debug, Clone, Default)]
@@ -202,6 +243,29 @@ impl MockSurface {
 
 impl SurfaceSource for MockSurface {
     fn state(&self) -> SurfaceState {
+        self.state.clone()
+    }
+}
+
+/// Stan skanu sektorów dla testów — moduł dostaje dokładnie przygotowany stan
+/// (bezczynny, w toku, zakończony albo nieudany).
+#[derive(Debug, Clone, Default)]
+pub struct MockSectors {
+    state: SectorState,
+}
+
+impl MockSectors {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_state(state: SectorState) -> Self {
+        Self { state }
+    }
+}
+
+impl SectorSource for MockSectors {
+    fn state(&self) -> SectorState {
         self.state.clone()
     }
 }
@@ -300,8 +364,10 @@ pub struct Harness {
     pub host: MockHost,
     pub machine: MockMachine,
     pub live: MockLive,
+    pub sensors: MockSensors,
     pub storage: MockStorage,
     pub surface: MockSurface,
+    pub sectors: MockSectors,
     pub locale: Locale,
 }
 
@@ -313,8 +379,10 @@ impl Harness {
             host: MockHost::default(),
             machine: MockMachine::new(),
             live: MockLive::new(),
+            sensors: MockSensors::new(),
             storage: MockStorage::new(),
             surface: MockSurface::new(),
+            sectors: MockSectors::new(),
             locale: Locale::Pl,
         }
     }
@@ -344,6 +412,11 @@ impl Harness {
         self
     }
 
+    pub fn with_sensors(mut self, sensors: MockSensors) -> Self {
+        self.sensors = sensors;
+        self
+    }
+
     pub fn with_storage(mut self, storage: MockStorage) -> Self {
         self.storage = storage;
         self
@@ -351,6 +424,11 @@ impl Harness {
 
     pub fn with_surface(mut self, surface: MockSurface) -> Self {
         self.surface = surface;
+        self
+    }
+
+    pub fn with_sectors(mut self, sectors: MockSectors) -> Self {
+        self.sectors = sectors;
         self
     }
 
@@ -366,8 +444,10 @@ impl Harness {
             host: &self.host,
             machine: &self.machine,
             live: &self.live,
+            sensors: &self.sensors,
             storage: &self.storage,
             surface: &self.surface,
+            sectors: &self.sectors,
             locale: self.locale,
         }
     }

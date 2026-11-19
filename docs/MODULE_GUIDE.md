@@ -1,6 +1,6 @@
 # Jak dodać nowy moduł do SerwisKit
 
-Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 2 w toku, 2026‑11‑18 — SMART dysków gotowy). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
+Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 2 — SMART, benchmark, skan sektorów i czujniki `hw.sensors`, 2026‑11‑19). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
 
 Zasada nadrzędna: **moduł to jeden plik i nie dotyka kodu UI.** Jeśli musisz zmienić renderer, żeby dodać moduł, to znaczy, że moduł jest źle zaprojektowany albo brakuje typu bloku w kontrakcie (procedura w §9).
 
@@ -13,14 +13,15 @@ crates/
   sk-core/                 kontrakt: Module, View, Capability, błędy, i18n, rejestr, telemetria, makiety
     locales/pl/*.json      tłumaczenia (jeden plik na rodzinę modułów)
     locales/en/*.json
-  sk-win/                  WMI + cache, zegar, środowisko procesu, rejestr, EDID, dyski/SMART — JEDYNE miejsce z `unsafe`
+  sk-win/                  WMI + cache, zegar, środowisko procesu, rejestr, EDID, dyski/SMART, czujniki — JEDYNE miejsce z `unsafe`
   sk-modules/              MODUŁY: jeden plik = jeden moduł
     src/edid.rs           parser EDID (czysty Rust, testy na fixtures)
     src/smart.rs          parsery SMART NVMe i ATA oraz ocena stanu (czysty Rust)
+    src/sensors.rs        wspólne odczyty temperatur dysków (SMART) dla czujników
     src/bench.rs          analiza mapy prędkości: statystyki, punkty wykresu, wynik
     src/util.rs           wspólne dekodowanie WMI i formatowanie wartości
     src/modules/mod.rs     lista modułów i rejestracja (dwie linie na moduł)
-    src/modules/hw_*.rs    moduły sprzętowe
+    src/modules/hw_*.rs    moduły sprzętowe (m.in. `hw_sensors` — czujniki)
     src/modules/storage_*.rs moduły dyskowe (SMART, benchmark; surface w kolejce)
     tests/contract.rs      automatyczne testy każdego modułu
     tests/golden.rs        wzorce kształtu widoków (`tests/golden/*.json`)
@@ -100,7 +101,9 @@ pub struct CollectCtx<'a> {
     pub machine: &'a dyn MachineInfo,  // firmware(), adapter_memory(), display_edid()
     pub storage: &'a dyn StorageProbe, // describe(index), smart(index) — dyski fizyczne (Faza 2)
     pub live: &'a dyn LiveSource,      // samples() — historia telemetrii (Faza 1)
+    pub sensors: &'a dyn SensorsSource, // readings(), history() — czujniki GPU/ACPI/baterii
     pub surface: &'a dyn SurfaceSource, // state() — wynik/stan testu prędkości (Faza 2)
+    pub sectors: &'a dyn SectorSource, // state() — stan skanu sektorów
     pub locale: Locale,
 }
 ```
@@ -110,6 +113,8 @@ pub struct CollectCtx<'a> {
 `StorageProbe` (Faza 2) daje to, czego WMI nie daje o dyskach: magistralę i rodzaj nośnika z deskryptora urządzenia oraz **surowe** bloki SMART. Implementacja realna (`sk-win/src/storage.rs`) wymaga administratora; makieta (`MockStorage`) podstawia gotowe bajty.
 
 `SurfaceSource` (Faza 2) daje **stan testu prędkości powierzchni**: `Idle`, `Running` (postęp i próbki częściowe), `Done(SurfaceScan)` albo `Failed`. Pomiaru nie wykonuje `collect()` — trwa sekundy lub godziny, więc uruchamia go osobny wątek aplikacji (`sk-app/src/bench.rs`) i zapisuje wynik do `SurfaceStore`. Moduł `storage.bench` tylko czyta ten stan i zamienia go na widok; dzięki temu jest bezstanowy i testowalny przez `MockSurface`. Tryb CLI używa `IdleSurface` — raport pokazuje wtedy objaśnienie zamiast wyniku.
+
+`SensorsSource` (Faza 2 — czujniki) daje **bieżące odczyty i historię**: `readings()` zwraca `SensorReading` (urządzenie, rodzaj, kanał, wartość), a `history()` próbki od otwarcia modułu do minimum/maksimum/średniej. Transport żyje w `sk-win/src/sensors.rs` (AMD ADL, NVIDIA NVML, strefy ACPI i bateria przez WMI), a próbki zbiera wątek roboczy aplikacji (`SensorStore`) razem z telemetrią. Moduł `hw.sensors` nie odpytuje sprzętu sam — temperatury dysków bierze przez `StorageProbe` (SMART), bo tam jest to jedyne źródło. Makieta: `MockSensors` (`with_readings`, `with_samples`).
 
 Kolejne fazy rozszerzą kontekst (Faza 3: `dpapi: &dyn Dpapi` do haseł przeglądarek). Rozszerzenie wykonuje lider, nie autor modułu.
 
@@ -403,6 +408,47 @@ Reguły, których oczekuje review:
 - **Brak administratora to degradacja.** `AccessDenied` → `Failed` z komunikatem i notką o uprawnieniach; `collect()` nadal zwraca `Ok`.
 - **Wykres rysuje się w gotowym układzie.** Oś X to pozycja w GB (1 GB = 1024³ B), rozpięta na cały dysk: `Chart::with_zero_base().with_x_range(0.0, dysk_gb)`. Renderer używa `default_x_bounds` + `x_axis_formatter` (podziałka „100 GB”, „200 GB”…), a HTML skaluje SVG do `x_max`. Skala nie zależy od danych, więc wykres jest kompletny od pierwszej próbki; skala Y zawsze od zera, bo kilkuprocentowe różnice wyglądają inaczej jak góry i doliny.
 - **Test sprzętowy akceptuje oba warianty.** `scan_surface` bez podniesienia procesu zwraca `AccessDenied` — test `#[ignore]` ma to przyjąć, a nie zakładać dane.
+- **Zapis wykresu to zrzut podglądu, nie renderowanie od zera.** Przycisk „Zapisz PNG” otwiera modal z tym samym `Chart` (`bench::chart`), a plik powstaje z klatki: `ctx.request_screenshot` → `chart_image::crop` (prostokąt w punktach przeliczony przez `image.size / ctx.content_rect()`) → `chart_image::write_png`. Podgląd rysuje `render::ChartMode::Still`, więc podpowiedzi kursora nie trafiają do pliku; nazwa pliku to `wykres-<model>-<czas>.png`.
+
+---
+
+### 5.4 Czujniki — `hw.sensors`
+
+Zasada: **transport w `sk-win`, model w `sk-core`, interpretacja w module**. User mode nie daje wszystkiego, co HWiNFO, ale daje więcej, niż WMI: temperatury i moc GPU, obroty wentylatora, taktowania, strefy ACPI, baterię i temperatury dysków.
+
+```rust
+ctx.sensors.readings()            // GPU (ADL/NVML), ACPI, bateria — z ostatniej próbki
+ctx.sensors.history()             // próbki 1/s od otwarcia modułu (min/max/średnia)
+ctx.storage.smart(index)          // NVMe/ATA — temperatura nośnika (wymaga admina)
+```
+
+Reguły, których oczekuje review:
+
+- **Brak sterownika to nie błąd.** `atiadlxx.dll`/`nvml.dll` mogą nie istnieć (inna karta, brak sterownika). `WinSensors` zwraca wtedy mniej odczytów, a moduł — notkę. Testy sprzętowe akceptują brak karty.
+- **AMD: PMLog, nie OverdriveN.** Na RDNA2 (Overdrive w wersji 8) `ADL2_OverdriveN_*` i OD5 zwracają błąd; działa `ADL2_New_QueryPMLogData_Get` (256 wpisów `{supported, value}`). Starsze karty obsługuje fallback OverdriveN/OD5/OD6.
+- **NVML dynamicznie.** `nvml.dll` jest w `System32` razem ze sterownikiem NVIDIA; brak biblioteki = brak odczytów, nie panika.
+- **Temperatura rdzeni CPU jest poza zasięgiem user mode.** WMI jej nie wystawia, a MSR/SMN wymaga ring 0 — dlatego moduł zawsze dodaje notkę o Fazie 5 (helper LHM + PawnIO), dopóki nie pojawi się odczyt `DeviceKind::Cpu`.
+- **Dyski przez SMART, nie WMI.** NVMe: strona logu zdrowia (`parse_nvme_health`, czujniki 1–8), ATA: atrybut 194/190 (`smart::ata_temperature`). Bez administratora `AccessDenied` daje notkę i puste temperatury, a nie `Err`.
+- **Historia jest w `SensorStore`.** `collect()` nie próbkuje: próbki dopisuje wątek roboczy razem z `LiveHistory`, więc widok odświeża się co sekundę, a CLI pokazuje jedną próbkę bez statystyk.
+- **Wartości i etykiety.** Nazwa urządzenia (model GPU, model dysku, nazwa strefy ACPI, numer kanału `#2`) jest daną; rodzaj czujnika to klucz i18n (`SensorKind` → `module.hw_sensors.sensor.*`). Jednostki i precyzja są w `sk_core::sensors::format_reading`.
+
+### 5.4 Skan nieczytelnych sektorów — `storage.sectors`
+
+Zasada ta sama co przy benchmarku: **transport w `sk-win`, plan i mapa w `sk-core`, sterowanie w aplikacji**.
+
+```rust
+// sk-win/src/sector.rs — jedyne miejsce, które czyta jednostki w tym trybie
+scan_sectors(&params, &cancel, &mut |progress| { /* postęp */ })?;
+// sk-core/src/sector.rs — plan przebiegu i mapa powierzchni
+sector::plan(&params).steps(); sector::quick_probes(span); SectorState::map();
+```
+
+- **Dwa tryby to różne plany, nie różne prędkości.** Dokładny czyta każdą jednostkę `SECTOR_UNIT_BYTES` (4 MiB) od początku do końca; szybki `QUICK_PROBES` (64) próbek po `QUICK_PROBE_UNITS` (8) jednostek, rozłożonych równo po powierzchni. `plan()` zwraca `SectorPlan::Full` albo `Probes`, a `steps()` jest mianownikiem postępu — dzięki temu transport nie zna trybów.
+- **Błąd odczytu to dana.** `ReadFile` może zwrócić błąd, 0 B albo część jednostki; każdy z tych przypadków dopisuje wpis do `SectorScan::errors` (limit `MAX_SECTOR_ERRORS`, potem `errors_truncated`) i liczy się jako wykonany krok. Przebieg kończy tylko błąd pozycjonowania.
+- **Pozycja błędu ma rozdzielczość jednostki** (4 MiB), bo tyle obejmuje jeden `ReadFile`. Bez bisection do 4 KiB: każdy nieudany odczyt wywołuje retry dysku, a na końcu żywotności to minuty — lista i mapa mają wskazać obszar, nie zastąpić `chkdsk`.
+- **Mapa ma stały kształt.** `Block::Map` z `SurfaceMap`: 64×64 komórek (`MAP_CELLS`) niezależnie od pojemności; na 2 TB komórka to 512 MiB, na 512 GB — 120 MiB. Tryb szybki rysuje 8×8 komórek (jedna na próbkę), bo próbki są rozrzucone i odległości między nimi nie da się pokazać w skali dysku. Komórki jeszcze nieodczytane są `Pending`, więc mapa rośnie w trakcie skanu.
+- **Bez limitu czasu.** Skan ma pokryć całą powierzchnię, więc limit nie ma sensu; krótki test to tryb szybki. Postęp liczy się z kroków, a „Pozostało” z tempa dotychczasowego przebiegu.
+- **Dwa testy naraz fałszują wynik.** Karta skanu i karta benchmarku blokują Start, gdy drugi test biegnie — oba czytają ten sam nośnik.
 
 ---
 
@@ -415,6 +461,7 @@ Reguły, których oczekuje review:
 | kontrakt (automatyczny) | unikalne `id`, klucze metadanych, brak paniki | `crates/sk-modules/tests/contract.rs` — nic nie dopisujesz |
 | golden widoku | stabilny kształt raportu (JSON) | `crates/sk-modules/tests/golden.rs` — dopisz swój moduł, jeśli jego widok jest kontraktem |
 | sprzętowy `#[ignore]` | realne WMI na maszynie serwisowej | `crates/sk-modules/tests/hardware.rs` — dopisz swój `id` do listy modułów, jeśli chcesz go tam objąć |
+| sprzętowy ADL/NVML `#[ignore]` | prawdziwe czujniki GPU | `crates/sk-win/src/sensors.rs` — akceptuje brak karty, bo nie każda maszyna ma ADL/NVML |
 
 Wzorce golden odświeżasz świadomie: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`, potem commit z opisem, dlaczego widok się zmienił.
 

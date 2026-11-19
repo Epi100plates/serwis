@@ -18,7 +18,9 @@ macro_rules! fixture_rows {
     };
 }
 
-mod bench;
+/// Analiza benchmarku powierzchni — wspólna dla modułu `storage.bench`
+/// i podglądu wykresu w GUI (`sk-app`).
+pub mod bench;
 mod edid;
 mod modules;
 mod smart;

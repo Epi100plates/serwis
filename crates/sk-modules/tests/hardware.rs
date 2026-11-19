@@ -10,12 +10,15 @@
 
 use sk_core::i18n::Locale;
 use sk_core::module::CollectCtx;
+use sk_core::sensors::SensorStore;
 use sk_core::surface::IdleSurface;
-use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinSensors, WinStorage, WinWmi};
 
 /// Benchmark nie jest uruchamiany w testach sprzętowych — moduł ma pokazać
 /// poprawny stan bezczynny.
 const IDLE: IdleSurface = IdleSurface;
+/// Skan sektorów ma własny wątek w GUI; tutaj widok dostaje stan bezczynny.
+const IDLE_SECTORS: sk_core::sector::IdleSectors = sk_core::sector::IdleSectors;
 
 fn ctx_parts() -> (
     WinWmi,
@@ -24,7 +27,12 @@ fn ctx_parts() -> (
     WinMachine,
     WinStorage,
     sk_core::live::LiveHistory,
+    SensorStore,
 ) {
+    // Jedna próbka z prawdziwych czujników: testy sprzętowe mają widzieć
+    // temperatury GPU, a nie pustą tabelę.
+    let mut sensors = SensorStore::new(4);
+    sensors.push(0.0, WinSensors::new().readings());
     (
         WinWmi::new(),
         SystemClock::new(),
@@ -32,6 +40,7 @@ fn ctx_parts() -> (
         WinMachine::new(),
         WinStorage::new(),
         sk_core::live::LiveHistory::new(4),
+        sensors,
     )
 }
 
@@ -39,7 +48,7 @@ fn ctx_parts() -> (
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn every_hardware_module_reads_real_data() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, storage, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live, sensors) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
@@ -48,6 +57,8 @@ fn every_hardware_module_reads_real_data() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        sensors: &sensors,
+        sectors: &IDLE_SECTORS,
         surface: &IDLE,
         locale: Locale::Pl,
     };
@@ -60,6 +71,7 @@ fn every_hardware_module_reads_real_data() {
         "hw.gpu",
         "hw.monitor",
         "hw.disk_inventory",
+        "hw.sensors",
         "storage.bench",
         "system.info",
     ] {
@@ -84,7 +96,7 @@ fn every_hardware_module_reads_real_data() {
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn cpu_memory_and_disks_report_positive_numbers() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, storage, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live, sensors) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
@@ -93,6 +105,8 @@ fn cpu_memory_and_disks_report_positive_numbers() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        sensors: &sensors,
+        sectors: &IDLE_SECTORS,
         surface: &IDLE,
         locale: Locale::Pl,
     };
@@ -135,7 +149,7 @@ fn cpu_memory_and_disks_report_positive_numbers() {
 #[ignore = "wymaga prawdziwego WMI: cargo test -p sk-modules --test hardware -- --ignored"]
 fn missing_battery_degrades_instead_of_failing() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, storage, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live, sensors) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
@@ -144,6 +158,8 @@ fn missing_battery_degrades_instead_of_failing() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        sensors: &sensors,
+        sectors: &IDLE_SECTORS,
         surface: &IDLE,
         locale: Locale::Pl,
     };
@@ -161,7 +177,7 @@ fn missing_battery_degrades_instead_of_failing() {
 #[ignore = "wymaga prawdziwych dysków i administratora: cargo test -p sk-modules --test hardware -- --ignored"]
 fn smart_reports_drives_and_degrades_without_elevation() {
     let registry = sk_modules::registry();
-    let (wmi, clock, host, machine, storage, live) = ctx_parts();
+    let (wmi, clock, host, machine, storage, live, sensors) = ctx_parts();
     wmi.begin_round();
     let ctx = CollectCtx {
         wmi: &wmi,
@@ -170,6 +186,8 @@ fn smart_reports_drives_and_degrades_without_elevation() {
         machine: &machine,
         storage: &storage,
         live: &live,
+        sensors: &sensors,
+        sectors: &IDLE_SECTORS,
         surface: &IDLE,
         locale: Locale::Pl,
     };

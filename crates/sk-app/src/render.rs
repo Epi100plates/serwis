@@ -6,7 +6,7 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, PlotPoints};
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, NoteLevel, StatusLevel, Table, View};
+use sk_core::view::{Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, Table, View};
 
 pub fn view(ui: &mut egui::Ui, view: &View, translator: &Translator) {
     if view.sections.is_empty() {
@@ -87,6 +87,37 @@ fn block_ui(ui: &mut egui::Ui, block: &Block, translator: &Translator) {
             });
         }
         Block::Chart { chart } => chart_ui(ui, chart, translator),
+        Block::Map { map } => map_ui(ui, map),
+    }
+}
+
+/// Mapa powierzchni: siatka kolorowanych kwadratów jak w HD Tune.
+fn map_ui(ui: &mut egui::Ui, map: &SurfaceMap) {
+    const CELL: f32 = 8.0;
+    const GAP: f32 = 1.0;
+    let columns = usize::try_from(map.columns.max(1)).unwrap_or(1);
+    let rows = map.cells.len().div_ceil(columns);
+    if map.cells.is_empty() {
+        ui.label("-");
+        return;
+    }
+    let size = egui::vec2(columns as f32 * (CELL + GAP), rows as f32 * (CELL + GAP));
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter();
+    for (index, cell) in map.cells.iter().enumerate() {
+        let column = index % columns;
+        let row = index / columns;
+        let min = rect.min + egui::vec2(column as f32 * (CELL + GAP), row as f32 * (CELL + GAP));
+        let color = match cell {
+            MapCell::Ok => egui::Color32::from_rgb(60, 150, 90),
+            MapCell::Bad => egui::Color32::from_rgb(205, 80, 80),
+            MapCell::Pending => egui::Color32::from_rgb(70, 76, 84),
+        };
+        painter.rect_filled(
+            egui::Rect::from_min_size(min, egui::vec2(CELL, CELL)),
+            1.0,
+            color,
+        );
     }
 }
 
@@ -139,17 +170,31 @@ fn table_ui(ui: &mut egui::Ui, table: &Table, translator: &Translator) {
         });
 }
 
-/// Wykres liniowy. Osie są stałe (bez zoomu i przesuwania), bo to podgląd
-/// telemetrii, a nie narzędzie do analizy — interakcja byłaby tu pułapką.
+/// Wykres liniowy z etykietą. Osie są stałe (bez zoomu i przesuwania), bo to
+/// podgląd telemetrii, a nie narzędzie do analizy — interakcja byłaby tu pułapką.
 fn chart_ui(ui: &mut egui::Ui, chart: &Chart, translator: &Translator) {
     ui.label(
         egui::RichText::new(translator.t(&chart.title_key))
             .small()
             .weak(),
     );
+    chart_plot(ui, chart, 170.0, chart.title_key.as_str(), ChartMode::Live);
+}
 
-    let mut plot = Plot::new(chart.title_key.as_str())
-        .height(170.0)
+/// Czy wykres ma reagować na kursor. `Still` wyłącza podpowiedzi, żeby zrzut
+/// do pliku nie zależał od położenia myszy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartMode {
+    Live,
+    Still,
+}
+
+/// Sam rysunek wykresu, bez etykiety. Wyciągnięty osobno, bo ten sam wykres
+/// pokazuje podgląd zrzutu w GUI (`sk-app::app`) — zapisany obrazek ma być
+/// dokładnie tym, co widać na ekranie.
+pub fn chart_plot(ui: &mut egui::Ui, chart: &Chart, height: f32, id_salt: &str, mode: ChartMode) {
+    let mut plot = Plot::new(id_salt)
+        .height(height)
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
@@ -183,7 +228,13 @@ fn chart_ui(ui: &mut egui::Ui, chart: &Chart, translator: &Translator) {
                 egui::Color32::from_rgb(230, 140, 70),
                 egui::Color32::from_rgb(90, 190, 130),
             ][index % 3];
-            plot_ui.line(Line::new(series.label.clone(), points).color(color));
+            let line = Line::new(series.label.clone(), points).color(color);
+            let line = if mode == ChartMode::Still {
+                line.allow_hover(false)
+            } else {
+                line
+            };
+            plot_ui.line(line);
         }
     });
 }
@@ -278,6 +329,36 @@ mod tests {
 
         harness.get_by_label("Stan dysku");
         harness.get_by_label("Dobry");
+    }
+
+    #[test]
+    fn renders_surface_map_without_panicking() {
+        let translator = Translator::load().expect("tłumaczenia się wczytują");
+        let maps = [
+            // Pełna siatka, pusta mapa i zerowa liczba kolumn — kolumny są
+            // dzielnikiem przy układaniu komórek, więc każdy wariant musi
+            // dać się narysować.
+            SurfaceMap {
+                cells: vec![MapCell::Ok, MapCell::Bad, MapCell::Pending],
+                columns: 3,
+            },
+            SurfaceMap {
+                cells: Vec::new(),
+                columns: 64,
+            },
+            SurfaceMap {
+                cells: vec![MapCell::Pending],
+                columns: 0,
+            },
+        ];
+        for map in maps {
+            let model = View::new(vec![
+                Section::new("module.storage_sectors.section").with_blocks(vec![Block::map(map)]),
+            ]);
+            let mut harness = Harness::new_ui(|ui| view(ui, &model, &translator));
+            harness.run_steps(2);
+            harness.get_by_label("Mapa powierzchni");
+        }
     }
 
     #[test]

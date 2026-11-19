@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::Locale;
-use crate::providers::{Clock, HostEnv, LiveSource, MachineInfo, StorageProbe, WmiProvider};
+use crate::providers::{
+    Clock, HostEnv, LiveSource, MachineInfo, SensorsSource, StorageProbe, WmiProvider,
+};
+use crate::sector::SectorSource;
 use crate::surface::SurfaceSource;
 use crate::view::View;
 
@@ -92,8 +95,12 @@ pub struct CollectCtx<'a> {
     pub storage: &'a dyn StorageProbe,
     /// Historia próbek telemetrii (pusta, jeśli nikt jeszcze nie próbkował).
     pub live: &'a dyn LiveSource,
+    /// Bieżące odczyty czujników i ich historia (pusta, jeśli nikt nie próbkował).
+    pub sensors: &'a dyn SensorsSource,
     /// Stan testu prędkości powierzchni (bezczynny w trybie CLI i raportu).
     pub surface: &'a dyn SurfaceSource,
+    /// Stan skanu nieczytelnych sektorów (bezczynny w trybie CLI i raporcie).
+    pub sectors: &'a dyn SectorSource,
     pub locale: Locale,
 }
 

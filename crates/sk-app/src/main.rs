@@ -16,11 +16,13 @@
 
 mod app;
 mod bench;
+mod chart_image;
 mod cli;
 mod html;
 mod live;
 mod render;
 mod report;
+mod sector;
 
 #[cfg(test)]
 mod tests_support;

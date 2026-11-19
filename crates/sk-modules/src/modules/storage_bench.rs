@@ -14,7 +14,7 @@ use sk_core::prelude::*;
 use sk_core::surface::{SurfaceScan, SurfaceState, covered_bytes};
 
 use crate::bench::{self, BenchOutcome};
-use crate::util::{decode_all, format_bytes, number, text};
+use crate::util::{decode_all, format_bytes, format_size, number, text};
 
 const DISK_QUERY: &str = queries::WIN32_DISK_DRIVE;
 /// Ile wierszy nieczytelnych bloków pokazujemy w tabeli; pełna lista jest
@@ -85,10 +85,6 @@ impl Module for StorageBench {
                 "module.storage_bench.note.wmi",
             ));
         }
-        blocks.push(Block::note(
-            NoteLevel::Info,
-            "module.storage_bench.note.readonly",
-        ));
 
         let view = View::new(vec![
             Section::new("module.storage_bench.section").with_blocks(blocks),
@@ -143,12 +139,9 @@ fn drive_rows(drives: &[DiskDrive]) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Stan bezczynny: objaśnienie, lista dysków do wyboru i ograniczenia.
+/// Stan bezczynny: lista dysków do wyboru i ograniczenia.
 fn idle_view(drives: &[DiskDrive], elevated: bool) -> (Vec<Block>, serde_json::Value) {
-    let mut blocks = vec![Block::note(
-        NoteLevel::Info,
-        "module.storage_bench.note.idle",
-    )];
+    let mut blocks = Vec::new();
 
     if drives.is_empty() {
         blocks.push(Block::note(
@@ -175,10 +168,6 @@ fn idle_view(drives: &[DiskDrive], elevated: bool) -> (Vec<Block>, serde_json::V
             "module.storage_bench.note.elevation",
         ));
     }
-    blocks.push(Block::note(
-        NoteLevel::Info,
-        "module.storage_bench.note.whole_disk",
-    ));
 
     (blocks, serde_json::json!({ "state": "idle" }))
 }
@@ -205,16 +194,8 @@ fn running_view(
     let mut blocks = vec![Block::key_values(vec![
         KeyValue::new("module.storage_bench.row.drive", &model),
         KeyValue::new(
-            "module.storage_bench.row.drive_index",
-            params.drive.to_string(),
-        ),
-        KeyValue::new(
             "module.storage_bench.row.disk_size",
             format_bytes(disk_bytes),
-        ),
-        KeyValue::new(
-            "module.storage_bench.row.progress",
-            format!("{progress:.0} %"),
         ),
         KeyValue::new(
             "module.storage_bench.row.read",
@@ -243,17 +224,12 @@ fn running_view(
         ),
     ])];
 
-    blocks.push(Block::note(
-        NoteLevel::Info,
-        "module.storage_bench.note.running",
-    ));
-
     // Wykres jest od pierwszej chwili: oś X to cały dysk w GB, a punkty
     // dochodzą na swoje miejsce w trakcie próbkowania.
-    blocks.push(chart_block(
-        bench::chart_points(samples),
+    blocks.push(Block::chart(bench::chart(
+        samples,
         disk_bytes.max(params.span_bytes),
-    ));
+    )));
 
     let data = serde_json::json!({
         "state": "running",
@@ -299,10 +275,6 @@ fn done_view(
     let mut rows = vec![
         KeyValue::new("module.storage_bench.row.drive", &model),
         KeyValue::new(
-            "module.storage_bench.row.drive_index",
-            scan.params.drive.to_string(),
-        ),
-        KeyValue::new(
             "module.storage_bench.row.disk_size",
             format_size(scan.disk_bytes),
         ),
@@ -324,7 +296,7 @@ fn done_view(
         ),
         KeyValue::new(
             "module.storage_bench.row.duration",
-            format_duration(scan.duration_ms),
+            bench::format_duration(scan.duration_ms),
         ),
         time_limit_row(&scan.params),
         KeyValue::new(
@@ -411,12 +383,9 @@ fn done_view(
         BenchOutcome::Complete => {}
     }
 
-    let points = bench::chart_points(&scan.samples);
-    let point_count = points.len();
-    blocks.push(chart_block(
-        points,
-        scan.disk_bytes.max(scan.params.span_bytes),
-    ));
+    let chart = bench::chart(&scan.samples, scan.disk_bytes.max(scan.params.span_bytes));
+    let point_count = chart.series.first().map_or(0, |series| series.points.len());
+    blocks.push(Block::chart(chart));
 
     if !scan.errors.is_empty() {
         let rows: Vec<Vec<String>> = scan
@@ -497,19 +466,6 @@ fn failed_view(
     (blocks, data)
 }
 
-/// Wykres mapy prędkości. Oś X jest rozpięta na cały dysk w GB i ustawiona
-/// z góry, więc wykres rysuje się w gotowym układzie — punkty dochodzą na
-/// swoje miejsce, zamiast rozciągać skalę przy każdej próbce.
-fn chart_block(points: Vec<[f64; 2]>, disk_bytes: u64) -> Block {
-    let mut chart = Chart::new("module.storage_bench.chart.speed", "GB", "MB/s")
-        .with_zero_base()
-        .with_series(vec![ChartSeries::new("READ", points)]);
-    if disk_bytes > 0 {
-        chart = chart.with_x_range(0.0, bench::gigabytes(disk_bytes));
-    }
-    Block::chart(chart)
-}
-
 fn with_common_data(
     mut data: serde_json::Value,
     state: &SurfaceState,
@@ -569,7 +525,7 @@ fn time_limit_row(params: &SurfaceParams) -> KeyValue {
     } else {
         KeyValue::new(
             "module.storage_bench.row.time_limit",
-            format_duration(params.time_limit_ms),
+            bench::format_duration(params.time_limit_ms),
         )
     }
 }
@@ -579,37 +535,6 @@ fn format_speed(mbps: f64) -> String {
         return "-".to_string();
     }
     format!("{mbps:.1} MB/s")
-}
-
-/// Rozmiar z jednostką dobraną do wielkości: mapa prędkości operuje na MiB
-/// (zakres, blok), a dyski na GB/TB. `format_bytes` zawsze pokazuje GB, więc
-/// dla małych wartości dawałoby „0.0 GB”.
-fn format_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-    const TIB: f64 = GIB * 1024.0;
-    let value = bytes as f64;
-    if value >= TIB {
-        format!("{:.2} TB", value / TIB)
-    } else if value >= GIB {
-        format!("{:.1} GB", value / GIB)
-    } else if value >= MIB {
-        format!("{:.0} MB", value / MIB)
-    } else if value >= KIB {
-        format!("{:.0} KB", value / KIB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn format_duration(millis: u64) -> String {
-    let seconds = millis / 1000;
-    if seconds >= 60 {
-        format!("{} min {:02} s", seconds / 60, seconds % 60)
-    } else {
-        format!("{:.1} s", millis as f64 / 1000.0)
-    }
 }
 
 fn bus_key(bus: BusKind) -> &'static str {
@@ -684,13 +609,21 @@ mod tests {
     }
 
     #[test]
-    fn idle_explains_how_to_start_and_lists_drives() {
+    fn idle_lists_drives_without_prose() {
         let output = StorageBench
             .collect(&harness(SurfaceState::Idle).ctx())
             .expect("stan bezczynny to nie błąd");
         assert_eq!(output.data["state"], "idle");
-        assert!(output.view.uses_key("module.storage_bench.note.idle"));
-        assert!(output.view.uses_key("module.storage_bench.note.readonly"));
+        // Z uprawnieniami i działającym WMI widok bezczynny to sama lista
+        // dysków — instrukcję „co zrobić” mówi karta w panelu GUI.
+        assert!(
+            output.view.sections[0]
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Note { .. })),
+            "bezczynny widok nie ma notek: {:?}",
+            output.view.sections[0].blocks
+        );
         let table = output.view.sections[0]
             .blocks
             .iter()
@@ -737,7 +670,6 @@ mod tests {
             .expect("stan w toku");
         assert_eq!(output.data["state"], "running");
         assert_eq!(output.data["progress_percent"], 50.0);
-        assert!(output.view.uses_key("module.storage_bench.note.running"));
         assert!(output.view.uses_key("module.storage_bench.chart.speed"));
     }
 

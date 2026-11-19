@@ -11,6 +11,8 @@ pub mod module;
 pub mod providers;
 pub mod queries;
 pub mod registry;
+pub mod sector;
+pub mod sensors;
 pub mod surface;
 pub mod view;
 
@@ -25,15 +27,24 @@ pub mod prelude {
     pub use crate::module::{Capability, CollectCtx, Group, Module, ModuleMeta, ModuleOutput};
     pub use crate::providers::{
         AdapterMemory, BusKind, Clock, DriveKind, Firmware, HostEnv, LiveSource, MachineInfo,
-        NS_CIMV2, NS_WMI, PhysicalDrive, SmartData, StorageProbe, WmiProvider,
+        NS_CIMV2, NS_WMI, PhysicalDrive, SensorsSource, SmartData, StorageProbe, WmiProvider,
     };
     pub use crate::queries;
     pub use crate::registry::ModuleRegistry;
+    pub use crate::sector::{
+        IdleSectors, SectorError, SectorMode, SectorParams, SectorPlan, SectorProgress, SectorScan,
+        SectorSource, SectorState, SectorStore,
+    };
+    pub use crate::sensors::{
+        DeviceKind, SensorKind, SensorReading, SensorSample, SensorStore, SensorUnit,
+        format_reading,
+    };
     pub use crate::surface::{
         IdleSurface, SurfaceAccess, SurfaceParams, SurfaceReadError, SurfaceSample, SurfaceScan,
         SurfaceSource, SurfaceState, SurfaceStore,
     };
     pub use crate::view::{
-        Badge, Block, Chart, ChartSeries, KeyValue, NoteLevel, Section, StatusLevel, Table, View,
+        Badge, Block, Chart, ChartSeries, KeyValue, MapCell, NoteLevel, Section, StatusLevel,
+        SurfaceMap, Table, View,
     };
 }

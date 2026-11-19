@@ -2,7 +2,7 @@
 
 Narzędzie serwisowe dla Windows 10/11 x64: diagnostyka sprzętu (jak AIDA64), testy dysków i SMART (jak HD Tune / CrystalDiskInfo) oraz migracja profili przeglądarek między komputerami. Jeden plik `.exe`, praca offline, moduły dokładane przez kontrybutorów.
 
-Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 12 modułów (telemetria AIDA‑lite, wykresy live, SMART dysków NVMe i ATA/SATA, benchmark prędkości powierzchni) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
+Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 14 modułów (telemetria AIDA‑lite, wykresy live, czujniki GPU/ACPI/baterii i temperatura dysków, SMART NVMe i ATA/SATA, benchmark prędkości powierzchni, skan sektorów) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
 
 ![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
 
@@ -14,9 +14,19 @@ Tabela atrybutów ATA z kolumną „Ocena” — zrzut z makiety (`MockStorage`)
 
 ![Tabela atrybutów ATA z oceną — dane syntetyczne](docs/screenshot-smart-ata-synthetic.png)
 
-Benchmark prędkości powierzchni (`storage.bench`) — panel z wyborem dysku i szybkości testu (15 s / 30 s / 60 s / bez limitu). Test próbkuje **cały dysk** i mieści się w wybranym czasie, a wykres od razu ma układ całego nośnika z podziałką w GB. Obok mapy prędkości: czas dostępu 4K i lista nieczytelnych bloków. Test tylko czyta dane, można go anulować:
+Benchmark prędkości powierzchni (`storage.bench`) — panel z wyborem dysku i czasu testu (15 s / 30 s / 60 s / bez limitu). Test próbkuje **cały dysk** i mieści się w wybranym czasie, a wykres od razu ma układ całego nośnika z podziałką w GB. Podgląd wykresu zapisuje się do PNG razem z modelem i pojemnością dysku:
 
 ![Benchmark prędkości dysku — panel i mapa prędkości](docs/screenshot-bench.png)
+
+![Wykres zapisany do PNG — model dysku, pojemność i mapa prędkości](docs/screenshot-bench-chart.png)
+
+Skan nieczytelnych sektorów (`storage.sectors`) — Error Scan jak w HD Tune: mapa powierzchni i lista nieczytelnych zakresów. Tryb szybki czyta próbki rozrzucone po całym nośniku, dokładny — każdą jednostkę 4 MiB od początku do końca. Zrzut: skan szybki na CT1000MX500 (2,0 GB w 4,2 s, 0 błędów):
+
+![Skan sektorów — mapa powierzchni i wynik skanu szybkiego](docs/screenshot-sectors.png)
+
+Czujniki (`hw.sensors`) — to, co w HWiNFO: temperatury i hotspot GPU, obroty oraz PWM wentylatora, moc, napięcie i taktowania, a do tego temperatury dysków. Min/Maks/Średnia liczą się z próbek co sekundę, temperatury rysują się na wykresie:
+
+![Czujniki — GPU, min/max/średnia i wykres temperatur](docs/screenshot-sensors.png)
 
 Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
 
@@ -36,7 +46,9 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 | `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
 | `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
 | `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
-| `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB, wykres rozpięty na cały dysk), prędkość minimalna/średnia/maksymalna, czas dostępu i IOPS losowego odczytu 4K, lista nieczytelnych bloków; wybór dysku i limitu czasu (15 s / 30 s / 60 s / bez limitu), próbkowanie całej powierzchni, Start/Anuluj, tylko odczyt |
+| `hw.sensors` | temperatury (rdzeń GPU, hotspot, pamięć, dyski NVMe/ATA, strefy ACPI, bateria), wentylator w RPM i PWM, moc, napięcie, taktowania i obciążenie GPU; min/max/średnia z próbek co sekundę i wykres temperatur (AMD ADL, NVIDIA NVML, WMI) |
+| `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB, wykres rozpięty na cały dysk), prędkość minimalna/średnia/maksymalna, czas dostępu i IOPS losowego odczytu 4K, lista nieczytelnych bloków; wybór dysku i czasu testu, próbkowanie całej powierzchni, Start/Anuluj, zapis wykresu do PNG |
+| `storage.sectors` | skan nieczytelnych sektorów jak Error Scan w HD Tune: mapa powierzchni (zielone/czerwone komórki), lista nieczytelnych zakresów z pozycją w MB, tryb szybki (próbki po całej powierzchni) i dokładny (każda jednostka 4 MiB); wybór dysku, Start/Anuluj |
 | `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd (stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane), baner oceny, wskaźniki NVMe (zapas bloków, % zużycia, odczyt/zapis, komendy hosta, cykle, błędy medium) lub ATA (temperatura, zużycie, przealokowane/oczekujące/niepoprawne sektory, CRC), **pełna tabela atrybutów ATA z tłumaczonymi nazwami i oceną każdego atrybutu** |
 | `system.info` | wersja systemu, model komputera, RAM, uptime, czas lokalny, typ komputera, hypervisor, uprawnienia |
 | `system.live` | wykresy obciążenia CPU, taktowania i zużycia RAM — próbka co sekundę, historia 10 minut |
@@ -47,7 +59,7 @@ SMART i benchmark prędkości wymagają uprawnień administratora (manifest rele
 
 ## Zakres (wersja 1.0)
 
-- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt powierzchni z mapą prędkości, losowy odczyt 4K i czas dostępu (gotowe), surface test (odczyt), test zapisu tylko za jawnym potwierdzeniem.
+- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt powierzchni z mapą prędkości, losowy odczyt 4K i czas dostępu (gotowe), skan nieczytelnych sektorów w trybie szybkim i dokładnym (gotowe), test zapisu tylko za jawnym potwierdzeniem.
 - **Migracja:** wykrywanie profili Chrome/Edge/Brave/Firefox, zakładki, historia, ustawienia, hasła w granicach możliwości systemu, zaszyfrowany pakiet `.skpkg`.
 - **Raport:** JSON i HTML (gotowe w Fazie 1).
 
@@ -88,6 +100,10 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all
 cargo test -p sk-modules --test hardware -- --ignored   # prawdziwe WMI tej maszyny
 ```
+
+## Styl
+
+Dokumentacja i interfejs są dla ludzi, którzy znają temat. Piszemy krótko: bez tłumaczenia oczywistości, powtarzania tej samej wartości w kilku miejscach i opisów „co robi przycisk”. Nowy tekst ma nieść informację, której nie da się odczytać z widoku — jeśli nic nie wnosi, nie dodajemy go (reguła 11 w [`AGENTS.md`](AGENTS.md)).
 
 ## Dokumentacja
 

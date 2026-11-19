@@ -87,6 +87,8 @@ impl Section {
                 }
                 // Etykiety serii są danymi („CPU 1”), nie tekstem interfejsu.
                 Block::Chart { chart } => out.push(chart.title_key.clone()),
+                // Mapa powierzchni nie ma tekstu — komórki to dana, nie etykiety.
+                Block::Map { .. } => {}
             }
         }
     }
@@ -112,6 +114,9 @@ pub enum Block {
     },
     /// Wykres liniowy — telemetria w czasie (Faza 1: `system.live`).
     Chart { chart: Chart },
+    /// Mapa powierzchni: siatka komórek w kolejności rosnących offsetów.
+    /// Tak HD Tune pokazuje wynik Error Scan — zielone i czerwone kwadraty.
+    Map { map: SurfaceMap },
 }
 
 impl Block {
@@ -149,6 +154,32 @@ impl Block {
     pub fn chart(chart: Chart) -> Self {
         Self::Chart { chart }
     }
+
+    pub fn map(map: SurfaceMap) -> Self {
+        Self::Map { map }
+    }
+}
+
+/// Mapa powierzchni — siatka komórek w kolejności rosnących offsetów.
+///
+/// `columns` jest częścią widoku, a nie rendererów: GUI i raport HTML mają
+/// narysować ten sam układ, więc szerokość okna nie zmienia geometrii mapy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceMap {
+    pub cells: Vec<MapCell>,
+    pub columns: u32,
+}
+
+/// Stan jednej komórki mapy powierzchni.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MapCell {
+    /// Odczytana, bez błędów.
+    Ok,
+    /// Odczytana, zawiera nieczytelny zakres.
+    Bad,
+    /// Jeszcze nieodczytana (skan w toku) albo pominięta (tryb szybki).
+    Pending,
 }
 
 /// Poziom stanu do wyróżnienia w widoku. To wyłącznie warstwa prezentacji —

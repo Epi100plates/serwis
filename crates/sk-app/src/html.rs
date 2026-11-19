@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, NoteLevel, StatusLevel, View};
+use sk_core::view::{Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, View};
 
 use crate::report::{ModuleEntry, Report};
 
@@ -53,6 +53,10 @@ td.lvl-warn { color: #8a6a12; font-weight: 600; }
 td.lvl-bad { color: #a52f2f; font-weight: 700; }
 figure.chart { margin: 12px 0; }
 figure.chart figcaption { font-size: 12px; color: #5b6167; margin-bottom: 2px; }
+figure.surface-map { margin: 12px 0; }
+.map-ok { fill: #2e9e5b; }
+.map-bad { fill: #cc5f5f; }
+.map-pending { fill: #e3e6ea; }
 svg { max-width: 100%; height: auto; }
 .errors { border-top-color: #cc5f5f; }
 footer { margin-top: 36px; color: #7b8187; font-size: 12px; }
@@ -236,7 +240,39 @@ fn block_html(out: &mut String, block: &Block, translator: &Translator) {
                 chart_svg(chart),
             );
         }
+        Block::Map { map } => map_html(out, map),
     }
+}
+
+/// Mapa powierzchni w raporcie: ta sama siatka co w GUI, jako inline SVG.
+fn map_html(out: &mut String, map: &SurfaceMap) {
+    const CELL: u32 = 10;
+    let columns = map.columns.max(1);
+    let rows = (map.cells.len() as u32).div_ceil(columns).max(1);
+    let width = columns * CELL;
+    let height = rows * CELL;
+    let _ = writeln!(
+        out,
+        "<figure class=\"surface-map\"><svg viewBox=\"0 0 {width} {height}\" width=\"{width}\" height=\"{height}\" role=\"img\">"
+    );
+    for (index, cell) in map.cells.iter().enumerate() {
+        let column = index as u32 % columns;
+        let row = index as u32 / columns;
+        let class = match cell {
+            MapCell::Ok => "map-ok",
+            MapCell::Bad => "map-bad",
+            MapCell::Pending => "map-pending",
+        };
+        let _ = writeln!(
+            out,
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" class=\"{class}\"/>",
+            column * CELL,
+            row * CELL,
+            CELL - 1,
+            CELL - 1,
+        );
+    }
+    out.push_str("</svg></figure>\n");
 }
 
 fn table_html(out: &mut String, table: &sk_core::view::Table, translator: &Translator) {
@@ -611,6 +647,53 @@ mod tests {
             "{html}"
         );
         assert!(html.contains("<td class=\"mono\">y</td>"), "{html}");
+    }
+
+    #[test]
+    fn map_block_becomes_svg_grid_with_cell_classes() {
+        let translator = Translator::load().expect("tłumaczenia");
+        let view = View::new(vec![
+            Section::new("module.storage_sectors.section").with_blocks(vec![Block::map(
+                SurfaceMap {
+                    cells: vec![MapCell::Ok, MapCell::Bad, MapCell::Pending, MapCell::Ok],
+                    columns: 2,
+                },
+            )]),
+        ]);
+        let mut html = String::new();
+        view_html(&mut html, &view, &translator);
+
+        assert_eq!(html.matches("<rect").count(), 4, "{html}");
+        assert_eq!(html.matches("map-ok").count(), 2, "{html}");
+        assert_eq!(html.matches("map-bad").count(), 1, "{html}");
+        assert_eq!(html.matches("map-pending").count(), 1, "{html}");
+    }
+
+    #[test]
+    fn empty_map_and_zero_columns_do_not_panic() {
+        // Pusta mapa: samo SVG, bez komórek.
+        let mut html = String::new();
+        map_html(
+            &mut html,
+            &SurfaceMap {
+                cells: Vec::new(),
+                columns: 64,
+            },
+        );
+        assert!(html.contains("<svg"), "{html}");
+        assert_eq!(html.matches("<rect").count(), 0, "{html}");
+
+        // Zerowa szerokość siatki nie może wywrócić układania komórek.
+        let mut flat = String::new();
+        map_html(
+            &mut flat,
+            &SurfaceMap {
+                cells: vec![MapCell::Ok],
+                columns: 0,
+            },
+        );
+        assert_eq!(flat.matches("<rect").count(), 1, "{flat}");
+        assert!(flat.contains("map-ok"), "{flat}");
     }
 
     #[test]

@@ -75,6 +75,30 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Rozmiar z jednostką dobraną do wielkości: od bajtów do TB.
+///
+/// [`format_bytes`] zawsze pokazuje GB (tak jak Windows), więc dla bloków
+/// i zakresów (4 MiB, 512 MiB) dawałby „0.0 GB”. Tu jednostka rośnie razem
+/// z wartością — do rozmiarów wewnątrz testu powierzchni.
+pub(crate) fn format_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    const TIB: f64 = GIB * 1024.0;
+    let value = bytes as f64;
+    if value >= TIB {
+        format!("{:.2} TB", value / TIB)
+    } else if value >= GIB {
+        format!("{:.1} GB", value / GIB)
+    } else if value >= MIB {
+        format!("{:.0} MB", value / MIB)
+    } else if value >= KIB {
+        format!("{:.0} KB", value / KIB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Rozmiar cache podany w KB przez WMI (`L2CacheSize`, `L3CacheSize`).
 pub(crate) fn format_kib(kilobytes: u32) -> String {
     if kilobytes == 0 {
@@ -156,6 +180,15 @@ mod tests {
         assert_eq!(format_bytes(512_105_932_800), "476.9 GB");
         assert_eq!(format_bytes(17_179_869_184), "16.0 GB");
         assert_eq!(format_bytes(2_000_398_934_016), "1.82 TB");
+    }
+
+    #[test]
+    fn formats_size_with_a_unit_fitting_the_value() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(1536), "2 KB");
+        assert_eq!(format_size(8 << 20), "8 MB");
+        assert_eq!(format_size(1536 << 20), "1.5 GB");
+        assert_eq!(format_size(3 << 40), "3.00 TB");
     }
 
     #[test]

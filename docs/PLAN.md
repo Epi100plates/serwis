@@ -1,6 +1,6 @@
 # SerwisKit — plan działania
 
-Dokument roboczy (stan: 2026‑11‑18). Wersja: 1.0. Nazwa kodowa: **SerwisKit** (zmienialna, patrz §11).
+Dokument roboczy (stan: 2026‑11‑19). Wersja: 1.0. Nazwa kodowa: **SerwisKit** (zmienialna, patrz §11).
 
 ---
 
@@ -42,7 +42,7 @@ Dwa tryby użycia tej samej logiki:
 
 | Funkcja AIDA64/HWiNFO | Dlaczego nie w v1 |
 |---|---|
-| Temperatura rdzeni CPU, napięcia, obroty wentylatorów, odczyt EC/SMBus | Wymaga kodu w ring 0 (MSR/SMBus/EC). WMI tego nie wystawia i nie wystawi. **Decyzja z 2026‑11‑18: wchodzi w Fazie 5 jako helper .NET z LibreHardwareMonitorLib + PawnIO** (podpisany driver, nie WinRing0 — ten jest na liście blokowanych, CVE‑2020‑14979). W wersji 1.0 raport mówi wprost: „temperatura rdzeni wymaga modułu sensorów”. |
+| Temperatury rdzeni CPU, napięcia CPU, obroty z EC/SMBus | Wymaga kodu w ring 0 (MSR/SMBus/EC). WMI tego nie wystawia i nie wystawi. **Decyzja z 2026‑11‑18: wchodzi w Fazie 5 jako helper .NET z LibreHardwareMonitorLib + PawnIO** (podpisany driver, nie WinRing0 — ten jest na liście blokowanych, CVE‑2020‑14979). W wersji 1.0 raport mówi wprost: „temperatura rdzeni wymaga modułu sensorów”. |
 | Obejście App‑Bound Encryption Chrome (v20) przez `IElevator`/wstrzykiwanie DLL | To sygnatura infostealera — AV/EDR to oznaczy, a zaufanie do narzędzia serwisowego znika. Hasła z Chrome: tylko legalne ścieżki (§6.3). |
 | Cloud, konta, telemetria, wysyłka danych | Narzędzie pracuje offline. Zero ruchu sieciowego z danymi klienta. |
 | Linux/macOS | Poza zakresem; architektura (trait + provider) nie zamyka drzwi, ale nie robimy tego teraz. |
@@ -60,7 +60,10 @@ Maszyna deweloperska: Windows 11 Enterprise 26300, Ryzen 5 5600, AMD RX 6700 XT,
 | Otwarcie `\\.\PhysicalDrive0/4` bez admina | `Odmowa dostępu` | SMART i benchmark surowy **wymagają podniesienia uprawnień** |
 | `Get-StorageReliabilityCounter` bez admina | `Klient nie ma dostępu do zasobu CIM` | to samo |
 | WMI: `Win32_Processor`, `Win32_PhysicalMemory`, `Win32_DiskDrive`, `Win32_BIOS`, `Win32_BaseBoard`, `Win32_VideoController` | zwracają dane | inwentarz działa bez admina |
-| WMI: `MSAcpi_ThermalZoneTemperature`, `Win32_Fan`, `Win32_Battery` | brak instancji na tym desktopie | temperatury/wentylatory przez WMI to iluzja; baterię testujemy na fixture'ach |
+| WMI: `MSAcpi_ThermalZoneTemperature`, `Win32_Fan`, `Win32_Battery` | klasa ACPI istnieje, ale bez instancji; `Win32_Fan` brak; `BatteryStatus` — `Invalid class` | strefy ACPI i baterię testujemy na fixture'ach; wentylatory przez WMI to iluzja |
+| AMD ADL (`atiadlxx.dll`) na RX 6700 XT | Overdrive w wersji 8; `ADL2_OverdriveN_*` i OD5 zwracają błąd, `ADL2_New_QueryPMLogData_Get` daje 56 °C, hotspot 60 °C, 663 RPM, 20 %, 33–37 W, 502/1984 MHz, 0,843 V | czujniki GPU w user mode są realne — przez PMLog, nie przez stare Overdrive |
+| NVIDIA NVML / `nvml.dll` | brak karty NVIDIA na tej maszynie | ścieżka NVML zaimplementowana, testy jednostkowe na wartościach; sprzętowo niepotwierdzona |
+| `Get-CimInstance root\wmi MSAcpi_ThermalZoneTemperature` | `Not supported` (0 instancji) | na desktopie brak stref; na laptopie ścieżka WMI jest jedynym user-mode źródłem temperatury płyty |
 | `root\wmi: ProcessorPerformance` | 12 instancji | live taktowanie CPU da się pokazać bez admina |
 | `Win32_VideoController.AdapterRAM` dla RX 6700 XT (12 GB) | 4 293 918 720 B (≈4 GiB) | potwierdzone obcięcie uint32 — VRAM trzeba brać z DXGI/rejestru |
 | `Win32_ProcessorPowerManagement` | `Invalid class` | klasa nie istnieje, nie używać |
@@ -205,7 +208,8 @@ Legenda uprawnień: **U** = zwykły użytkownik, **A** = administrator, **D** = 
 | Hasła Chromium (v20/ABE) | **tylko** eksport CSV z przeglądarki / import w UI | U | 3 (instrukcja) |
 | Rozszerzenia | ID + reinstalacja z Web Store; `Local Extension Settings` przy zgodnej wersji | U | 3 |
 | Migracja plików użytkownika (foldery osobiste), lista programów | system plików, rejestr `Uninstall` | U | 4 |
-| Temperatury rdzeni CPU, napięcia, wentylatory | driver (PawnIO/LHM lub własny KMDF) | A + driver | 5 (opcjonalnie) |
+| Czujniki user mode: temperatury, wentylatory, moc i taktowanie GPU, strefy ACPI, bateria, temperatury dysków | AMD ADL (PMLog/OverdriveN), NVIDIA NVML, `MSAcpi_ThermalZoneTemperature`, `BatteryStatus`, SMART NVMe/ATA | U (dyski: A) | 2 (zrobione) |
+| Temperatury rdzeni CPU, napięcia CPU, wentylatory z EC/SMBus | driver (PawnIO/LHM lub własny KMDF) | A + driver | 5 (opcjonalnie) |
 
 Uwaga o SMART przez USB: mostki USB‑SATA często nie przekazują SMART, a NVMe po USB nie ma health logu. Moduł ma to zgłaszać jako „niedostępne przez ten mostek”, nie jako błąd.
 
@@ -361,12 +365,25 @@ Zrealizowane:
 - **Próbkowanie całej powierzchni w limicie czasu (2026‑11‑20):** panel ma tylko dysk i szybkość testu (15 s / 30 s / 60 s / bez limitu), a `scan_surface` próbkuje cały nośnik: krok liczy `next_sample_offset` (pozostała odległość ÷ liczba kroków, które zmieszczą się w pozostałym czasie; czas kroku z pozycjonowaniem, EMA 0,7/0,3, margines 0,9). Ostatnia próbka trafia na koniec dysku razem z terminem, więc mapa jest pełna, a liczba próbek zależy od budżetu, nie od rozmiaru. Bez limitu — zwykły odczyt sekwencyjny. Postęp przy limicie liczy zegar (`SurfaceState::Running.elapsed_ms`), wiersz „Pokryty zakres” pokazuje pozycję ostatniej próbki.
 - **Wykres w gotowym układzie:** oś X w GB (1 GB = 1024³ B) rozpięta na cały dysk przez `Chart::with_x_range`; renderer używa `default_x_bounds` + `x_axis_formatter`, więc podziałka pokazuje „100 GB”, „200 GB”…, a HTML skaluje SVG do `x_max`. Wykres rysuje się od pierwszej próbki, bez rozciągania skali.
 - `sk-app`: panel testu (dysk, szybkość testu 15 s / 30 s / 60 s / bez limitu, Start/Anuluj, pasek postępu), dedykowany wątek `serwiskit-bench`, wspólny `SurfaceStore`, odświeżanie widoku 4×/s.
-- Testy: 33 nowe jednostkowe (typy i magazyn, analiza mapy, moduł na `MockSurface`, wyrównanie/statystyki i odczyt z `FILE_FLAG_NO_BUFFERING` na pliku tymczasowym w `sk-win`, rozmiar dysku w panelu) + 21 dla limitu i próbkowania (podział budżetu, plan kroków `next_sample_offset`, rozrzut próbek na pliku tymczasowym, postęp z zegara, pokryty zakres, zgodność JSON ze starym formatem, etykiety szybkości, stały zakres osi X w modelu i w SVG), golden `storage_bench_view.json` (mapa w GB + `x_min`/`x_max`), 1 sprzętowy `#[ignore]`. Razem **242 testy zielone, 7 `#[ignore]`**; bramki `fmt`/`clippy`/`test`/`build --release` zielone.
-- Dowód z GUI: `docs/screenshot-bench.png` — **realny pomiar** na CT1000MX500SSD1 (931,5 GB) uruchomiony z manifestu release (administrator): limit 60 s, 492 próbki, pokryty zakres 926,6 GB / 931,5 GB, odczytane 28,3 GB, ≈549 MB/s, wykres 0–931,5 GB z podziałką co 100 GB.
+- Testy: 33 nowe jednostkowe (typy i magazyn, analiza mapy, moduł na `MockSurface`, wyrównanie/statystyki i odczyt z `FILE_FLAG_NO_BUFFERING` na pliku tymczasowym w `sk-win`, rozmiar dysku w panelu) + 21 dla limitu i próbkowania (podział budżetu, plan kroków `next_sample_offset`, rozrzut próbek na pliku tymczasowym, postęp z zegara, pokryty zakres, zgodność JSON ze starym formatem, etykiety szybkości, stały zakres osi X w modelu i w SVG), golden `storage_bench_view.json` (mapa w GB + `x_min`/`x_max`), 1 sprzętowy `#[ignore]`. Razem **251 testów zielonych, 7 `#[ignore]`**; bramki `fmt`/`clippy`/`test`/`build --release` zielone.
+- Dowód z GUI: `docs/screenshot-bench.png` — **realny pomiar** na CT1000MX500SSD1 (931,5 GB) uruchomiony z manifestu release (administrator): limit 60 s (przebieg 57,0 s), 491 próbek, pokryty zakres 931,5 GB / 931,5 GB, średnia 535,5 MB/s (min 359,3 / maks 556,3), 9 779 IOPS, wykres 0–931,5 GB z podziałką co 100 GB; `docs/screenshot-bench-chart.png` — ten sam wykres zapisany przyciskiem „Zapisz PNG”.
+- **Karta sterowania, zapis PNG i porządek w tekstach (2026‑11‑19):** panel testu to jedna karta (dysk, cztery przedziały czasu jako przełącznik, Start/Anuluj, pasek postępu) — bez statystyk, bo te są w widoku modułu. Przycisk „Zapisz PNG” otwiera podgląd (`egui::Modal`) z modelem i pojemnością dysku, a plik powstaje ze zrzutu klatki (`ctx.request_screenshot` → `chart_image::crop` → `chart_image::write_png` na crate `png`); nazwa `wykres-<model>-<czas>.png`. Podgląd rysuje `render::ChartMode::Still`, więc podpowiedzi kursora nie trafiają do pliku. Z widoku i i18n zniknęły teksty, które tłumaczyły oczywistości (notki „tylko odczyt”, „test w toku”, opis „jak w HD Tune”), a reguła „żadnych zbędnych informacji” trafiła do `AGENTS.md` (reguła 11) i README. Wspólne budowanie wykresu wydzielone do `bench::chart` (moduł `bench` jest `pub`), `format_duration` przeniesione do analizy. Nowe testy: kadrowanie i zapis PNG (4), nazwa pliku z modelem dysku (2), format czasu (1); golden `storage_bench_view.json` odświeżony (bez `row.drive_index` i notki „tylko odczyt”).
 
-**Pozostałe w Fazie 2:** `storage.surface` (test powierzchni z retry i listą złych LBA zamiast mapy prędkości), `storage.write_test` (`Destructive`) i `TaskDescriptor` (wspólny mechanizm zadań z postępem/anulowaniem).
+**Zrealizowane — `storage.sectors` (skan nieczytelnych sektorów, 2026‑11‑20):**
 
-**Akceptacja (częściowa):** SMART NVMe potwierdzony na maszynie testowej (dane powyżej, admin z manifestu). SMART SATA **niepotwierdzony sprzętowo** — jedyny dysk SATA w tej maszynie jest za kontrolerem, który odrzuca oba polecenia; ścieżka ATA ma testy jednostkowe na buforach zgodnych ze standardem i czeka na weryfikację na sprzęcie, który przekazuje SMART. `storage.bench` ma potwierdzoną ścieżkę odmowy dostępu, realną listę dysków oraz **realny pomiar na CT1000MX500SSD1** (release z manifestu `requireAdministrator`): 60 s limitu, 492 próbki rozrzucone po 931,5 GB, pokryty zakres 926,6 GB, ≈549 MB/s, 200 odczytów losowych. Do powtórzenia na HDD i na dysku 2 TB (na tej maszynie ich nie ma) oraz przy anulowaniu w trakcie.
+- Odpowiednik Error Scan z HD Tune: odczyt powierzchni z mapą zielonych/czerwonych komórek i listą nieczytelnych zakresów. Tylko odczyt, bez limitu czasu (pokrycie jest celem testu) i w dwóch trybach: **dokładny** (każda jednostka 4 MiB od początku do końca) i **szybki** (64 próbki × 32 MiB = 2 GiB rozrzucone po całej powierzchni). Podstawa: instrukcja HD Tune — Error Scan „scans the entire disk surface”, a quick scan testuje „only certain parts across the disk surface”.
+- `sk-core/src/sector.rs`: plan przebiegu (`plan`, `quick_probes`), typy wyniku (`SectorParams`, `SectorScan`, `SectorError`), mapowanie stanu na siatkę (`SectorState::map`) oraz `SectorStore` + `SectorSource` w `CollectCtx` (obok `SurfaceSource`). Jednostka odczytu 4 MiB — pozycja błędu ma rozdzielczość 4 MiB, jak wiersz „Error at … MB” w HD Tune; lista błędów ma limit 128 wpisów z flagą `errors_truncated`.
+- `sk-win/src/sector.rs`: `scan_sectors` na istniejącym `RawDevice` (`FILE_FLAG_NO_BUFFERING`, odczyt sekwencyjny bez seeka na jednostkę, seek tylko po błędzie). Błąd `ReadFile` to dana, nie przerwanie; anulowanie między jednostkami daje wynik częściowy.
+- `sk-modules/src/modules/storage_sectors.rs`: widok w układzie HD Tune — baner „Brak błędów”/„Nieczytelne sektory”, mapa powierzchni (`Block::Map`), tabela nieczytelnych zakresów (pozycja w MB, długość, komunikat) i lista dysków w stanie bezczynnym.
+- Kontrakt widoku: nowy `Block::Map` z `SurfaceMap`/`MapCell` (Ok/Bad/Pending), wspólny dla GUI i raportu HTML; mapa 64×64 komórek niezależnie od pojemności (na 2 TB komórka = 512 MiB), tryb szybki 8×8 (jedna komórka na próbkę).
+- `sk-app`: wątek `serwiskit-sector`, karta sterowania (dysk, tryb Szybki/Dokładny, Start/Anuluj, pasek postępu), odświeżanie 4×/s; Start zablokowany, gdy biegnie benchmark i odwrotnie — dwa testy naraz fałszują wynik.
+- Decyzje: brak bisection do 4 KiB (każdy nieudany odczyt wywołuje retry dysku, a na końcu żywotności to minuty; pozycja 4 MiB wystarcza do wskazania obszaru); mapa trybu szybkiego pokazuje stan próbek, nie ich położenie (są rozrzucone po powierzchni); nazwa `storage.sectors` zamiast planowanego `storage.surface` — mówi, co test sprawdza.
+
+- Testy: 10 w `sk-core` (plan próbek, mapa 64×64 i 8×8, postęp, magazyn, zgodność JSON), 6 w `sk-win` (na plikach tymczasowych z `FILE_FLAG_NO_BUFFERING`: pełny i szybki przebieg, anulowanie, limit listy błędów, kod błędu; 1 `#[ignore]` na prawdziwym dysku), 11 modułu (wszystkie stany widoku, ETA, prędkość, komplet kluczy PL/EN), 5 GUI/HTML (mapa w SVG z klasami komórek, puste mapy, etykiety stanu, zaokrąglanie zakresu). Razem **302 testy zielone, 9 `#[ignore]`**; `fmt`, `clippy`, `test`, `build --release` zielone. Raport CLI (14 modułów) zawiera `storage.sectors` w stanie `idle` z listą dysków — rejestracja i przekazanie `SectorStore` działają.
+
+**Pozostałe w Fazie 2:** `storage.write_test` (`Destructive`) i `TaskDescriptor` (wspólny mechanizm zadań z postępem/anulowaniem).
+
+**Akceptacja (częściowa):** SMART NVMe potwierdzony na maszynie testowej (dane powyżej, admin z manifestu). SMART SATA **niepotwierdzony sprzętowo** — jedyny dysk SATA w tej maszynie jest za kontrolerem, który odrzuca oba polecenia; ścieżka ATA ma testy jednostkowe na buforach zgodnych ze standardem i czeka na weryfikację na sprzęcie, który przekazuje SMART. `storage.bench` ma potwierdzoną ścieżkę odmowy dostępu, realną listę dysków oraz **realny pomiar na CT1000MX500SSD1** (release z manifestu `requireAdministrator`): limit 60 s (przebieg 57,0 s), 491 próbek rozrzuconych po 931,5 GB, pokryty zakres 931,5 GB, średnia 535,5 MB/s (359,3–556,3), 9 779 IOPS, 200 odczytów losowych; zapis wykresu do PNG z tego samego przebiegu (`docs/screenshot-bench-chart.png`). Do powtórzenia na HDD i na dysku 2 TB (na tej maszynie ich nie ma) oraz przy anulowaniu w trakcie. `storage.sectors` ma potwierdzoną rejestrację w raporcie CLI (stan `idle`, lista 4 dysków) i **realny skan szybki na CT1000MX500SSD1** (release z manifestu `requireAdministrator`): 2,0 GB odczytane w 4,2 s (średnio 515,5 MB/s), 64 próbki rozrzucone po 931,5 GB, 0 nieczytelnych zakresów, mapa 8×8 zielona; zrzut `docs/screenshot-sectors.png`. Transport potwierdzony też testem `#[ignore]` z podniesionego procesu (pierwsze 8 MiB `PhysicalDrive0`, 2/2 kroki, bez błędów). Do powtórzenia na dysku z realnymi złymi sektorami i w trybie dokładnym na HDD (na tej maszynie żaden nośnik nie jest uszkodzony) — mapa czerwieni komórki tylko wtedy, gdy `ReadFile` naprawdę zwróci błąd.
 
 ### Faza 3 — Migracja przeglądarek (5–8 dni)
 
@@ -382,6 +399,10 @@ Zrealizowane:
 Foldery osobiste z mapowaniem ścieżek, lista programów (rejestr `Uninstall`), rozmiary i sumy kontrolne, wznawianie po przerwaniu, raport „co przenieść ręcznie”.
 
 ### Faza 5 — Sensory głębokie: helper LibreHardwareMonitor + PawnIO (zaplanowana)
+
+**Stan 2026‑11‑19: część user mode zrobiona w module `hw.sensors`.** Bez sterownika działają: temperatura rdzenia i hotspot GPU, wentylator (RPM i PWM), moc, napięcie, taktowania i obciążenie GPU (AMD ADL — PMLog na RDNA2+, fallback OverdriveN/OD5; NVIDIA NVML), strefy termiczne ACPI, temperatura i napięcie baterii oraz temperatury dysków NVMe/ATA z SMART. Historia 1 s daje min/max/średnią, a temperatury rysują się na wykresie. Potwierdzone na RX 6700 XT: 56 °C, hotspot 60 °C, 663 RPM, 33 W, 502/1990 MHz.
+
+Poza zasięgiem user mode pozostaje **temperatura rdzeni CPU** (WMI jej nie wystawia, MSR/SMN wymaga ring 0), napięcia CPU i wentylatory z EC/SMBus — to nadal wymaga helpera z podpisem.
 
 Cel: temperatury rdzeni CPU, napięcia, obroty wentylatorów, pobór mocy CPU (RAPL) — to, czego WMI nie daje.
 

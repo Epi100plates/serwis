@@ -5,6 +5,7 @@
 //! nierówna prędkość na HDD) testuje się bez dysku i bez administratora.
 
 use sk_core::surface::{SurfaceSample, SurfaceScan};
+use sk_core::view::{Chart, ChartSeries};
 
 /// Ile punktów trafia do wykresu. Pomiary mogą mieć 16k próbek, a ekran i tak
 /// nie pokaże więcej — średnia z grupy zachowuje kształt krzywej.
@@ -91,6 +92,21 @@ pub fn chart_points(samples: &[SurfaceSample]) -> Vec<[f64; 2]> {
         .collect()
 }
 
+/// Wykres mapy prędkości w gotowym układzie: oś X (GB) rozpięta na cały dysk,
+/// więc skala nie zależy od tego, ile próbek już przyszło.
+///
+/// Wspólny dla widoku modułu i podglądu w GUI (`sk-app`), żeby zapisany obrazek
+/// miał dokładnie ten sam wykres co ekran.
+pub fn chart(samples: &[SurfaceSample], disk_bytes: u64) -> Chart {
+    let mut chart = Chart::new("module.storage_bench.chart.speed", "GB", "MB/s")
+        .with_zero_base()
+        .with_series(vec![ChartSeries::new("READ", chart_points(samples))]);
+    if disk_bytes > 0 {
+        chart = chart.with_x_range(0.0, gigabytes(disk_bytes));
+    }
+    chart
+}
+
 /// Jak zakończył się przebieg — na tej podstawie moduł dobiera stan i notkę.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BenchOutcome {
@@ -106,6 +122,16 @@ pub enum BenchOutcome {
     /// Przebieg zatrzymał się na limicie czasu — mapa obejmuje tylko początek
     /// zakresu, ale sam test wykonał się w całości.
     TimeLimit,
+}
+
+/// Czas w formie czytanej w widoku i w podglądzie wykresu: „58.4 s”, „1 min 00 s”.
+pub fn format_duration(millis: u64) -> String {
+    let seconds = millis / 1000;
+    if seconds >= 60 {
+        format!("{} min {:02} s", seconds / 60, seconds % 60)
+    } else {
+        format!("{:.1} s", millis as f64 / 1000.0)
+    }
 }
 
 pub fn outcome(scan: &SurfaceScan) -> BenchOutcome {
@@ -217,6 +243,14 @@ mod tests {
         assert!(chart_points(&[]).is_empty());
         // Próbka bez sensownej prędkości też nie rysuje punktu.
         assert!(chart_points(&[sample(0, 0.0)]).is_empty());
+    }
+
+    #[test]
+    fn duration_reads_in_seconds_below_a_minute_and_minutes_above() {
+        assert_eq!(format_duration(42_400), "42.4 s");
+        assert_eq!(format_duration(60_010), "1 min 00 s");
+        assert_eq!(format_duration(125_000), "2 min 05 s");
+        assert_eq!(format_duration(0), "0.0 s");
     }
 
     #[test]

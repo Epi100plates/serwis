@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sk_core::i18n::{Locale, Translator};
 use sk_core::module::CollectCtx;
 use sk_core::surface::IdleSurface;
-use sk_win::{SystemClock, WinHostEnv, WinMachine, WinStorage, WinWmi};
+use sk_win::{SystemClock, WinHostEnv, WinMachine, WinSensors, WinStorage, WinWmi};
 
 use crate::report::{self, Report, ReportOptions};
 
@@ -101,10 +101,14 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
     let machine = WinMachine::new();
     let storage = WinStorage::new();
     let live = sk_core::live::LiveHistory::new(1);
+    let sensor_probe = WinSensors::new();
+    let mut sensors = sk_core::sensors::SensorStore::new(1);
+    let sectors = sk_core::sector::IdleSectors;
     // Benchmark nie jest częścią raportu: trwa minuty i wymaga jawnego startu
     // w GUI, dlatego raport widzi stan bezczynny.
     let surface = IdleSurface;
     wmi.begin_round();
+    sensors.push(0.0, sensor_probe.readings());
 
     let ctx = CollectCtx {
         wmi: &wmi,
@@ -113,6 +117,8 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         machine: &machine,
         storage: &storage,
         live: &live,
+        sensors: &sensors,
+        sectors: &sectors,
         surface: &surface,
         locale,
     };
