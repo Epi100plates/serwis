@@ -2,7 +2,7 @@
 
 Narzędzie serwisowe dla Windows 10/11 x64: diagnostyka sprzętu (jak AIDA64), testy dysków i SMART (jak HD Tune / CrystalDiskInfo) oraz migracja profili przeglądarek między komputerami. Jeden plik `.exe`, praca offline, moduły dokładane przez kontrybutorów.
 
-Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 14 modułów (telemetria AIDA‑lite, wykresy live, czujniki GPU/ACPI/baterii i temperatura dysków, SMART NVMe i ATA/SATA, benchmark prędkości powierzchni, skan sektorów) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
+Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 14 modułów (telemetria AIDA‑lite, wykresy live, czujniki CPU/GPU/Super I/O/ACPI/baterii i temperatury dysków, SMART NVMe i ATA/SATA, benchmark prędkości powierzchni, skan sektorów) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
 
 ![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
 
@@ -24,9 +24,13 @@ Skan nieczytelnych sektorów (`storage.sectors`) — Error Scan jak w HD Tune: m
 
 ![Skan sektorów — mapa powierzchni i wynik skanu szybkiego](docs/screenshot-sectors.png)
 
-Czujniki (`hw.sensors`) — to, co w HWiNFO: temperatury i hotspot GPU, obroty oraz PWM wentylatora, moc, napięcie i taktowania, a do tego temperatury dysków. Min/Maks/Średnia liczą się z próbek co sekundę, temperatury rysują się na wykresie:
+Czujniki (`hw.sensors`) — to, co w HWiNFO: temperatury i hotspot GPU, obroty oraz PWM wentylatora, moc, napięcie i taktowania, a do tego temperatury dysków. Odczyty są pogrupowane po podzespole i rodzaju wielkości, a temperatury rysują się na wykresie 0–100 °C z oknem 120 s: nowe próbki wchodzą od prawej krawędzi, a legenda przypisuje kolor do podzespołu.
 
-![Czujniki — GPU, min/max/średnia i wykres temperatur](docs/screenshot-sensors.png)
+![Czujniki — grupy odczytów CPU i GPU](docs/screenshot-sensors-cpu.png)
+
+![Czujniki — wykres temperatur z legendą i stałą skalą](docs/screenshot-sensors-chart.png)
+
+Czujniki CPU i płyty wymagają sterownika PawnIO — wtedy dochodzą rdzenie (Tctl/Tdie, CCD), napięcia i moc pakietu CPU oraz wentylatory i temperatury Super I/O. Min/Maks/Średnia liczą się z próbek co sekundę.
 
 Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
 
@@ -46,7 +50,7 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 | `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
 | `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
 | `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
-| `hw.sensors` | temperatury (rdzeń GPU, hotspot, pamięć, dyski NVMe/ATA, strefy ACPI, bateria), wentylator w RPM i PWM, moc, napięcie, taktowania i obciążenie GPU; min/max/średnia z próbek co sekundę i wykres temperatur (AMD ADL, NVIDIA NVML, WMI) |
+| `hw.sensors` | temperatury (rdzenie CPU: Tctl/Tdie i CCD, rdzeń GPU, hotspot, pamięć, dyski NVMe/ATA, strefy ACPI, bateria, płyta), wentylatory w RPM i PWM, moc pakietu CPU i karty, napięcia CPU/SoC/GPU, taktowania i obciążenie GPU; min/max/średnia z próbek co sekundę i wykres temperatur (AMD ADL, NVIDIA NVML, WMI, PawnIO) |
 | `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB, wykres rozpięty na cały dysk), prędkość minimalna/średnia/maksymalna, czas dostępu i IOPS losowego odczytu 4K, lista nieczytelnych bloków; wybór dysku i czasu testu, próbkowanie całej powierzchni, Start/Anuluj, zapis wykresu do PNG |
 | `storage.sectors` | skan nieczytelnych sektorów jak Error Scan w HD Tune: mapa powierzchni (zielone/czerwone komórki), lista nieczytelnych zakresów z pozycją w MB, tryb szybki (próbki po całej powierzchni) i dokładny (każda jednostka 4 MiB); wybór dysku, Start/Anuluj |
 | `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd (stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane), baner oceny, wskaźniki NVMe (zapas bloków, % zużycia, odczyt/zapis, komendy hosta, cykle, błędy medium) lub ATA (temperatura, zużycie, przealokowane/oczekujące/niepoprawne sektory, CRC), **pełna tabela atrybutów ATA z tłumaczonymi nazwami i oceną każdego atrybutu** |
@@ -55,7 +59,7 @@ W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercy
 
 Raport: JSON (maszynowy, `schema_version`) i HTML (samodzielny plik, inline SVG, bez JavaScriptu).
 
-SMART i benchmark prędkości wymagają uprawnień administratora (manifest release je zapewnia). Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych. Benchmark bez administratora kończy się czytelnym komunikatem o odmowie dostępu.
+SMART i benchmark prędkości wymagają uprawnień administratora (manifest release je zapewnia). Czujniki CPU i płyty wymagają zainstalowanego [PawnIO](https://pawnio.eu/): bez niego raport działa, a moduł `hw.sensors` pokazuje notkę zamiast tych sekcji. Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych. Benchmark bez administratora kończy się czytelnym komunikatem o odmowie dostępu.
 
 ## Zakres (wersja 1.0)
 

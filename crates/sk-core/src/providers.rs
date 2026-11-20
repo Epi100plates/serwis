@@ -74,7 +74,22 @@ pub trait LiveSource: Send + Sync {
     fn samples(&self) -> Vec<LiveSample>;
 }
 
-/// Bieżące odczyty czujników i ich historia. Transport (ADL/NVML/WMI) jest
+/// Co udało się uruchomić w warstwie transportu czujników. Moduł wybiera na tej
+/// podstawie notkę: „brak sterownika” to inna sytuacja niż „sterownik działa,
+/// ale ten procesor nie ma czujników”.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SensorProbe {
+    /// Dostęp do ring 0 (podpisany sterownik PawnIO) — bez niego MSR/SMN i
+    /// Super I/O są niedostępne.
+    pub ring0: bool,
+    /// Czujniki CPU odpowiadają.
+    pub cpu: bool,
+    /// Super I/O (wentylatory, temperatury płyty) odpowiada.
+    pub board: bool,
+}
+
+/// Bieżące odczyty czujników i ich historia. Transport (ADL/NVML/WMI/PawnIO) jest
 /// w `sk-win`, a próbki zbiera wątek roboczy aplikacji — moduł tylko je czyta.
 ///
 /// Domyślne implementacje zwracają pusty zestaw: brak czujników na tej maszynie
@@ -88,6 +103,11 @@ pub trait SensorsSource: Send + Sync {
     /// Próbki od otwarcia modułu — do minimum, maksimum i średniej.
     fn history(&self) -> Vec<SensorSample> {
         Vec::new()
+    }
+
+    /// Które źródła są w ogóle dostępne (do notek, nie do odczytów).
+    fn probe(&self) -> SensorProbe {
+        SensorProbe::default()
     }
 }
 

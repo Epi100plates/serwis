@@ -9,7 +9,9 @@
 use std::fmt::Write as _;
 
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, View};
+use sk_core::view::{
+    Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, View, series_color,
+};
 
 use crate::report::{ModuleEntry, Report};
 
@@ -53,6 +55,14 @@ td.lvl-warn { color: #8a6a12; font-weight: 600; }
 td.lvl-bad { color: #a52f2f; font-weight: 700; }
 figure.chart { margin: 12px 0; }
 figure.chart figcaption { font-size: 12px; color: #5b6167; margin-bottom: 2px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 2px 14px; list-style: none;
+                padding: 0; margin: 4px 0 2px; font-size: 12px; color: #33383d; }
+.chart-legend .swatch { display: inline-block; width: 12px; height: 3px;
+                        margin-right: 6px; vertical-align: middle; border-radius: 1px; }
+details { margin: 10px 0 4px; }
+details > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: #33383d;
+                    padding: 2px 0; }
+details > summary:hover { color: #1a5fb4; }
 figure.surface-map { margin: 12px 0; }
 .map-ok { fill: #2e9e5b; }
 .map-bad { fill: #cc5f5f; }
@@ -235,12 +245,26 @@ fn block_html(out: &mut String, block: &Block, translator: &Translator) {
         Block::Chart { chart } => {
             let _ = writeln!(
                 out,
-                "<figure class=\"chart\">\n<figcaption>{}</figcaption>\n{}</figure>",
+                "<figure class=\"chart\">\n<figcaption>{}</figcaption>\n{}{}</figure>",
                 escape(&translator.t(&chart.title_key)),
+                chart_legend(chart),
                 chart_svg(chart),
             );
         }
         Block::Map { map } => map_html(out, map),
+        Block::Group { title_key, blocks } => {
+            // `<details open>` — w raporcie rozwijane bez JavaScriptu, a przy
+            // druku i wyszukiwaniu treść pozostaje widoczna.
+            let _ = writeln!(
+                out,
+                "<details open>\n<summary>{}</summary>",
+                escape(&translator.t(title_key))
+            );
+            for block in blocks {
+                block_html(out, block, translator);
+            }
+            out.push_str("</details>\n");
+        }
     }
 }
 
@@ -313,41 +337,57 @@ fn level_class(level: StatusLevel) -> &'static str {
 }
 
 /// Wykres jako inline SVG — bez JavaScriptu, więc raport działa z dysku.
-/// Osie: X od 0 do maksymalnego czasu serii, Y od 0 do maksimum danych
-/// (dla procentów zawsze 0–100, żeby skala była porównywalna).
+/// Zakres osi bierze z modelu, gdy moduł go ustawił (cały dysk, okno czasu),
+/// a poza tym dopasowuje do danych. Procenty zawsze skalujemy 0–100, żeby skala
+/// była porównywalna między maszynami.
 fn chart_svg(chart: &Chart) -> String {
     const WIDTH: f64 = 640.0;
     const HEIGHT: f64 = 180.0;
     const PAD: f64 = 26.0;
 
-    let mut max_x: f64 = chart.x_max.unwrap_or(0.0);
-    let mut max_y: f64 = 0.0;
+    let mut data_min_x = 0.0_f64;
+    let mut data_max_x = 0.0_f64;
+    let mut data_max_y = 0.0_f64;
     let mut any_point = false;
     for series in &chart.series {
         for [x, y] in &series.points {
             if x.is_finite() && y.is_finite() {
                 any_point = true;
-                max_x = max_x.max(*x);
-                max_y = max_y.max(*y);
+                data_min_x = data_min_x.min(*x);
+                data_max_x = data_max_x.max(*x);
+                data_max_y = data_max_y.max(*y);
             }
         }
     }
-    if !any_point || max_x <= 0.0 {
+    if !any_point {
         return String::new();
     }
-    // Procenty zawsze skalujemy 0–100 (seria samych zer to nie powód, by
-    // wykres znikał); dla innych jednostek unikamy dzielenia przez zero.
-    let max_y = if chart.y_label == "%" {
-        100.0_f64.max(max_y)
-    } else {
-        (max_y * 1.05).max(1.0)
+
+    let min_x = chart.x_min.unwrap_or(data_min_x.min(0.0));
+    let max_x = chart.x_max.unwrap_or(data_max_x);
+    let min_y = chart.y_min.unwrap_or(0.0);
+    let max_y = match chart.y_max {
+        Some(max) if max > min_y => max,
+        // Procenty zawsze 0–100 (seria samych zer to nie powód, by wykres
+        // znikał); dla innych jednostek unikamy dzielenia przez zero.
+        _ if chart.y_label == "%" => 100.0_f64.max(data_max_y),
+        _ => (data_max_y * 1.05).max(1.0),
     };
+    // NaN w danych nie może przejść przez projekcję: oś o zerowej szerokości
+    // albo niezdefiniowanym zakresie dałaby dzielenie przez zero.
+    if !(max_x - min_x).is_finite()
+        || max_x - min_x <= 0.0
+        || !(max_y - min_y).is_finite()
+        || max_y - min_y <= 0.0
+    {
+        return String::new();
+    }
 
     let plot_width = WIDTH - 2.0 * PAD;
     let plot_height = HEIGHT - 2.0 * PAD;
     let project = |x: f64, y: f64| {
-        let px = PAD + (x / max_x) * plot_width;
-        let py = PAD + plot_height - (y / max_y) * plot_height;
+        let px = PAD + (x - min_x) / (max_x - min_x) * plot_width;
+        let py = PAD + plot_height - (y - min_y) / (max_y - min_y) * plot_height;
         (px, py)
     };
 
@@ -357,7 +397,7 @@ fn chart_svg(chart: &Chart) -> String {
         escape(&chart.title_key)
     );
 
-    // Ramka i osie.
+    // Ramka i podziałka pozioma.
     let _ = write!(
         svg,
         "<rect x=\"{PAD}\" y=\"{PAD}\" width=\"{plot_width}\" height=\"{plot_height}\" \
@@ -372,22 +412,38 @@ fn chart_svg(chart: &Chart) -> String {
         );
     }
 
-    // Podziałka osi X: pięć równych kroków z wartościami. Przy ustalonym
-    // zakresie (np. cały dysk) raport pokazuje od razu całą szerokość.
+    // Podziałka osi: pięć równych kroków z wartościami. Przy ustalonym zakresie
+    // (cały dysk, okno czasu) raport pokazuje od razu całą szerokość.
     for step in 0..=4 {
         let fraction = f64::from(step) / 4.0;
+        // Wartości tuż przy zerze dają „-0” przy zaokrąglaniu.
+        let label = |value: f64| {
+            if value.abs() < 0.5 {
+                "0".to_string()
+            } else {
+                format!("{value:.0}")
+            }
+        };
         let _ = write!(
             svg,
             "<text x=\"{x:.1}\" y=\"{y:.1}\" font-size=\"8\" fill=\"#5b6167\" \
-             text-anchor=\"middle\">{:.0}</text>",
-            max_x * fraction,
+             text-anchor=\"middle\">{}</text>",
+            label(min_x + (max_x - min_x) * fraction),
             x = PAD + plot_width * fraction,
             y = PAD + plot_height + 12.0
+        );
+        let _ = write!(
+            svg,
+            "<text x=\"{x:.1}\" y=\"{y:.1}\" font-size=\"8\" fill=\"#5b6167\" \
+             text-anchor=\"end\">{}</text>",
+            label(min_y + (max_y - min_y) * fraction),
+            x = PAD - 4.0,
+            y = PAD + plot_height - plot_height * fraction + 3.0
         );
     }
 
     for (index, series) in chart.series.iter().enumerate() {
-        let color = ["#1a5fb4", "#c64600", "#26a269"][index % 3];
+        let color = series_color(index);
         let points: Vec<String> = series
             .points
             .iter()
@@ -420,16 +476,28 @@ fn chart_svg(chart: &Chart) -> String {
         y = PAD - 8.0,
         label = escape(&chart.y_label)
     );
-    let _ = write!(
-        svg,
-        "<text x=\"{x:.1}\" y=\"{y:.1}\" font-size=\"10\" fill=\"#5b6167\">{label}</text>",
-        x = PAD,
-        y = PAD + 4.0,
-        label = escape(&format!("{max_y:.0}"))
-    );
 
     svg.push_str("</svg>\n");
     svg
+}
+
+/// Legenda wykresu: próbka koloru i nazwa serii — ta sama paleta i kolejność co
+/// w GUI. Jedna seria ma nazwę w tytule wykresu, więc legenda byłaby powtórzeniem.
+fn chart_legend(chart: &Chart) -> String {
+    if chart.series.len() < 2 {
+        return String::new();
+    }
+    let mut legend = String::from("<ul class=\"chart-legend\">");
+    for (index, series) in chart.series.iter().enumerate() {
+        let _ = write!(
+            legend,
+            "<li><span class=\"swatch\" style=\"background:{}\"></span>{}</li>",
+            series_color(index),
+            escape(&series.label)
+        );
+    }
+    legend.push_str("</ul>\n");
+    legend
 }
 
 fn anchor(id: &str) -> String {
@@ -599,6 +667,82 @@ mod tests {
         // a nie na prawym końcu, jak przy skali dopasowanej do danych.
         assert!(svg.contains("84.8"), "{svg}");
         assert!(svg.contains(">100<"), "podziałka osi X: {svg}");
+    }
+
+    #[test]
+    fn group_renders_as_expandable_details() {
+        let translator = Translator::load().expect("tłumaczenia");
+        let view = View::new(vec![Section::new("module.hw_sensors.section").with_blocks(
+            vec![Block::group(
+                "module.hw_sensors.group.fan",
+                vec![Block::Table {
+                    table: Table::new(
+                        vec!["module.hw_sensors.col.value".to_string()],
+                        vec![vec!["1024 RPM".to_string()]],
+                    ),
+                }],
+            )],
+        )]);
+        let mut html = String::new();
+        view_html(&mut html, &view, &translator);
+        assert!(html.contains("<details open>"), "{html}");
+        assert!(html.contains("<summary>Wentylatory</summary>"), "{html}");
+        assert!(html.contains("1024 RPM"), "{html}");
+    }
+
+    #[test]
+    fn chart_legend_matches_series_colors() {
+        let chart = Chart::new("module.hw_sensors.chart.temperature", "s", "°C").with_series(vec![
+            ChartSeries::new("AMD Ryzen 5 5600", vec![[-1.0, 50.0], [0.0, 55.0]]),
+            ChartSeries::new("AMD Radeon RX 6700 XT", vec![[-1.0, 48.0], [0.0, 52.0]]),
+        ]);
+        let legend = chart_legend(&chart);
+        assert!(legend.contains(">AMD Ryzen 5 5600<"), "{legend}");
+        assert!(legend.contains(">AMD Radeon RX 6700 XT<"), "{legend}");
+        // Kolory z jednej palety — ten sam podzespół ma ten sam kolor w SVG.
+        let svg = chart_svg(&chart);
+        for color in [series_color(0), series_color(1)] {
+            assert!(legend.contains(&format!("background:{color}")), "{legend}");
+            assert!(svg.contains(&format!("stroke=\"{color}\"")), "{svg}");
+        }
+    }
+
+    #[test]
+    fn single_series_chart_has_no_legend() {
+        let chart = Chart::new("module.system_live.chart.cpu", "s", "%").with_series(vec![
+            ChartSeries::new("CPU", vec![[0.0, 10.0], [1.0, 20.0]]),
+        ]);
+        assert!(chart_legend(&chart).is_empty());
+    }
+
+    #[test]
+    fn fixed_y_range_scales_the_temperature_axis() {
+        let chart = Chart::new("module.hw_sensors.chart.temperature", "s", "°C")
+            .with_y_range(0.0, 100.0)
+            .with_series(vec![ChartSeries::new(
+                "CPU",
+                vec![[-1.0, 50.0], [0.0, 60.0]],
+            )]);
+        let svg = chart_svg(&chart);
+        // 50 °C na skali 0–100 pada w połowie wysokości pola (26 + 64 = 90 px).
+        assert!(svg.contains(",90.0"), "{svg}");
+        assert!(svg.contains(">100<"), "górna podziałka osi Y: {svg}");
+        assert!(svg.contains(">0<"), "dolna podziałka osi Y: {svg}");
+    }
+
+    #[test]
+    fn time_window_puts_the_newest_sample_on_the_right_edge() {
+        let chart = Chart::new("module.hw_sensors.chart.temperature", "s", "°C")
+            .with_x_range(-120.0, 0.0)
+            .with_series(vec![ChartSeries::new(
+                "CPU",
+                vec![[-120.0, 50.0], [-60.0, 55.0], [0.0, 60.0]],
+            )]);
+        let svg = chart_svg(&chart);
+        // Najnowsza próbka (0 s) trafia na prawą krawędź pola: 26 + 588 px.
+        assert!(svg.contains("614.0"), "{svg}");
+        assert!(svg.contains(">-120<"), "lewa krawędź okna: {svg}");
+        assert!(svg.contains(">0<"), "prawa krawędź okna: {svg}");
     }
 
     #[test]

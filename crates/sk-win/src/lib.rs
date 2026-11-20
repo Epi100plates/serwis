@@ -5,12 +5,16 @@
 
 mod clock;
 mod console;
+mod cpu;
 mod env;
+mod ffi;
 mod machine;
+mod pawnio;
 mod registry;
 mod sector;
 mod sensors;
 mod storage;
+mod superio;
 mod surface;
 mod wmi;
 

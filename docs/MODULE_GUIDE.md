@@ -1,6 +1,6 @@
 # Jak dodać nowy moduł do SerwisKit
 
-Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 2 — SMART, benchmark, skan sektorów i czujniki `hw.sensors`, 2026‑11‑19). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
+Dokument dla kontrybutorów i agentów AI. Opisuje **rzeczywisty** kontrakt z `crates/sk-core` (stan: Faza 2 — SMART, benchmark, skan sektorów i czujniki `hw.sensors`, 2026‑11‑20). Jeśli implementacja wymusi zmianę kontraktu — zmieniamy ten dokument i kod w tym samym PR.
 
 Zasada nadrzędna: **moduł to jeden plik i nie dotyka kodu UI.** Jeśli musisz zmienić renderer, żeby dodać moduł, to znaczy, że moduł jest źle zaprojektowany albo brakuje typu bloku w kontrakcie (procedura w §9).
 
@@ -101,7 +101,7 @@ pub struct CollectCtx<'a> {
     pub machine: &'a dyn MachineInfo,  // firmware(), adapter_memory(), display_edid()
     pub storage: &'a dyn StorageProbe, // describe(index), smart(index) — dyski fizyczne (Faza 2)
     pub live: &'a dyn LiveSource,      // samples() — historia telemetrii (Faza 1)
-    pub sensors: &'a dyn SensorsSource, // readings(), history() — czujniki GPU/ACPI/baterii
+    pub sensors: &'a dyn SensorsSource, // readings(), history(), probe() — GPU/CPU/Super I/O/ACPI/bateria
     pub surface: &'a dyn SurfaceSource, // state() — wynik/stan testu prędkości (Faza 2)
     pub sectors: &'a dyn SectorSource, // state() — stan skanu sektorów
     pub locale: Locale,
@@ -114,7 +114,7 @@ pub struct CollectCtx<'a> {
 
 `SurfaceSource` (Faza 2) daje **stan testu prędkości powierzchni**: `Idle`, `Running` (postęp i próbki częściowe), `Done(SurfaceScan)` albo `Failed`. Pomiaru nie wykonuje `collect()` — trwa sekundy lub godziny, więc uruchamia go osobny wątek aplikacji (`sk-app/src/bench.rs`) i zapisuje wynik do `SurfaceStore`. Moduł `storage.bench` tylko czyta ten stan i zamienia go na widok; dzięki temu jest bezstanowy i testowalny przez `MockSurface`. Tryb CLI używa `IdleSurface` — raport pokazuje wtedy objaśnienie zamiast wyniku.
 
-`SensorsSource` (Faza 2 — czujniki) daje **bieżące odczyty i historię**: `readings()` zwraca `SensorReading` (urządzenie, rodzaj, kanał, wartość), a `history()` próbki od otwarcia modułu do minimum/maksimum/średniej. Transport żyje w `sk-win/src/sensors.rs` (AMD ADL, NVIDIA NVML, strefy ACPI i bateria przez WMI), a próbki zbiera wątek roboczy aplikacji (`SensorStore`) razem z telemetrią. Moduł `hw.sensors` nie odpytuje sprzętu sam — temperatury dysków bierze przez `StorageProbe` (SMART), bo tam jest to jedyne źródło. Makieta: `MockSensors` (`with_readings`, `with_samples`).
+`SensorsSource` (Faza 2 — czujniki) daje **bieżące odczyty i historię**: `readings()` zwraca `SensorReading` (urządzenie, rodzaj, kanał, wartość), a `history()` próbki od otwarcia modułu do minimum/maksimum/średniej. Transport żyje w `sk-win/src/sensors.rs` (AMD ADL, NVIDIA NVML, strefy ACPI i bateria przez WMI), a odczyty ring 0 w `pawnio.rs`/`cpu.rs`/`superio.rs` (PawnIO). Próbki zbiera wątek roboczy aplikacji (`SensorStore`) razem z telemetrią, a `probe()` mówi, które źródła odpowiadają. Moduł `hw.sensors` nie odpytuje sprzętu sam — temperatury dysków bierze przez `StorageProbe` (SMART), bo tam jest to jedyne źródło. Makieta: `MockSensors` (`with_readings`, `with_samples`, `with_probe`).
 
 Kolejne fazy rozszerzą kontekst (Faza 3: `dpapi: &dyn Dpapi` do haseł przeglądarek). Rozszerzenie wykonuje lider, nie autor modułu.
 
@@ -137,6 +137,8 @@ pub enum Block {
     Badge { text_key: String },                 // np. "Administrator", "Niedostępne przez USB"
     Status { label_key, value_key, level },     // duży stan sekcji: „Stan dysku: Dobry”
     Chart { chart: Chart },                     // wykres liniowy (Faza 1: system.live)
+    Map { map: SurfaceMap },                    // mapa powierzchni (storage.sectors)
+    Group { title_key, blocks: Vec<Block> },    // rozwijana kategoria (`<details>` w HTML)
 }
 
 pub struct KeyValue {
@@ -157,11 +159,17 @@ pub struct Chart {
     pub x_label: String,               // jednostka osi, np. "s"
     pub y_label: String,               // jednostka osi, np. "%"
     pub from_zero: bool,               // skala Y od 0 (przepustowość); domyślnie false
+    pub x_min: Option<f64>,            // stały zakres osi X (`with_x_range`)
+    pub x_max: Option<f64>,            // np. cały dysk w GB albo okno czasu
+    pub y_min: Option<f64>,            // stały zakres osi Y (`with_y_range`)
+    pub y_max: Option<f64>,            // np. 0–100 °C
     pub series: Vec<ChartSeries>,      // label = dana ("CPU"), points = [x, y]
 }
 ```
 
 Reguła rozróżniania tekstu i danych: **kluczem i18n jest wszystko, co jest zdaniem lub etykietą** (nazwy sekcji, nagłówki tabel, etykiety wierszy, komunikaty, wartości logiczne). **Daną jest to, co przyszło z WMI lub z obliczeń** (nazwa procesora, numer seryjny, „3200 MHz”, „2010‑W46”). Nie wpisuj do wartości słów typu „tydzień” — wybierz format neutralny językowo (ISO 8601) albo użyj `value_key`.
+
+**Grupy zamiast jednej długiej tabeli.** `Block::group("…tytuł", blocks)` daje rozwijany nagłówek (`CollapsingHeader` w GUI, `<details>` w HTML; domyślnie otwarty, bo porządkuje, a nie ukrywa). `hw.sensors` grupuje odczyty najpierw po podzespole, potem po rodzaju wielkości; podzespół z jednym rodzajem (dysk: sama temperatura) nie dostaje zbędnego poziomu pośredniego.
 
 Dla stanów w **tabeli** użyj `Table::with_value_key(row, column, "common.value.digital")` — komórka jest wtedy tłumaczona tak samo jak `KeyValue::state`. Przykład: kolumna „Wejście” w `hw.monitor` (cyfrowe/analogowe) i kolumna stanu w `hw.disk_inventory`.
 
@@ -363,6 +371,8 @@ fn collect(&self, ctx: &CollectCtx<'_>) -> Result<ModuleOutput> {
 
 Próbki zbiera wątek roboczy aplikacji (`sk-app/src/live.rs`) i tylko wtedy, gdy moduł jest otwarty w GUI. Dzięki temu `collect()` jest natychmiastowe, a moduł pozostaje bezstanowy i testowalny przez `MockLive`.
 
+Stałe zakresy osi ustawia się w module, nie w rendererze: `.with_y_range(0.0, 100.0)` (temperatury — skala ma być termometrem, a nie autoskalowaniem do 50–70 °C) i `.with_x_range(min, max)` (cały dysk w GB, okno czasu). Okno czasu liczy się **wstecz od najnowszej próbki** (`x = 0` = teraz, `x_min = -120`), więc przebieg wchodzi od prawej krawędzi i przesuwa się w lewo, a skala nie zmienia się przy każdym odświeżeniu. Kolory serii pochodzą z jednej palety — `sk_core::view::series_color(index)`; przy dwóch i więcej seriach GUI i raport HTML dokładają legendę (próbka koloru + nazwa), bo sam kolor linii nie mówi, który podzespół jest który.
+
 ### 5.2 Surowe dane urządzeń — SMART
 
 Zasada: **transport w `sk-win`, parsowanie w module**. `StorageProbe` zwraca bajty dokładnie w takiej postaci, w jakiej daje je system:
@@ -414,20 +424,21 @@ Reguły, których oczekuje review:
 
 ### 5.4 Czujniki — `hw.sensors`
 
-Zasada: **transport w `sk-win`, model w `sk-core`, interpretacja w module**. User mode nie daje wszystkiego, co HWiNFO, ale daje więcej, niż WMI: temperatury i moc GPU, obroty wentylatora, taktowania, strefy ACPI, baterię i temperatury dysków.
+Zasada: **transport w `sk-win`, model w `sk-core`, interpretacja w module**. Czujniki user mode dają GPU, dyski, strefy ACPI i baterię; CPU, napięcia i Super I/O wymagają podpisanego sterownika PawnIO, więc są opcjonalne.
 
 ```rust
-ctx.sensors.readings()            // GPU (ADL/NVML), ACPI, bateria — z ostatniej próbki
+ctx.sensors.readings()            // GPU (ADL/NVML), CPU/Super I/O (PawnIO), ACPI, bateria
 ctx.sensors.history()             // próbki 1/s od otwarcia modułu (min/max/średnia)
+ctx.sensors.probe()               // SensorProbe { ring0, cpu, board } — do wyboru notki
 ctx.storage.smart(index)          // NVMe/ATA — temperatura nośnika (wymaga admina)
 ```
 
 Reguły, których oczekuje review:
 
-- **Brak sterownika to nie błąd.** `atiadlxx.dll`/`nvml.dll` mogą nie istnieć (inna karta, brak sterownika). `WinSensors` zwraca wtedy mniej odczytów, a moduł — notkę. Testy sprzętowe akceptują brak karty.
+- **Brak sterownika to nie błąd.** `atiadlxx.dll`/`nvml.dll`/`PawnIOLib.dll` mogą nie istnieć (inna karta, brak sterownika, maszyna bez PawnIO). `WinSensors` zwraca wtedy mniej odczytów, a moduł — notkę. Testy sprzętowe akceptują brak karty i brak PawnIO.
 - **AMD: PMLog, nie OverdriveN.** Na RDNA2 (Overdrive w wersji 8) `ADL2_OverdriveN_*` i OD5 zwracają błąd; działa `ADL2_New_QueryPMLogData_Get` (256 wpisów `{supported, value}`). Starsze karty obsługuje fallback OverdriveN/OD5/OD6.
 - **NVML dynamicznie.** `nvml.dll` jest w `System32` razem ze sterownikiem NVIDIA; brak biblioteki = brak odczytów, nie panika.
-- **Temperatura rdzeni CPU jest poza zasięgiem user mode.** WMI jej nie wystawia, a MSR/SMN wymaga ring 0 — dlatego moduł zawsze dodaje notkę o Fazie 5 (helper LHM + PawnIO), dopóki nie pojawi się odczyt `DeviceKind::Cpu`.
+- **CPU i Super I/O przez PawnIO.** `sk-win/src/pawnio.rs` ładuje `PawnIOLib.dll` i wgrywa podpisane moduły (`AMDFamily17`, `LpcIO`, `IntelMSR`), `cpu.rs` czyta SMN/MSR, `superio.rs` — rejestry Nuvoton NCT67xx. Sterownik instaluje technik; aplikacja go nie pobiera. Gdy `probe().ring0 == false`, moduł pokazuje notkę o PawnIO; gdy ring 0 działa, ale `cpu == false` — notkę „ten procesor nie ma czujników”.
 - **Dyski przez SMART, nie WMI.** NVMe: strona logu zdrowia (`parse_nvme_health`, czujniki 1–8), ATA: atrybut 194/190 (`smart::ata_temperature`). Bez administratora `AccessDenied` daje notkę i puste temperatury, a nie `Err`.
 - **Historia jest w `SensorStore`.** `collect()` nie próbkuje: próbki dopisuje wątek roboczy razem z `LiveHistory`, więc widok odświeża się co sekundę, a CLI pokazuje jedną próbkę bez statystyk.
 - **Wartości i etykiety.** Nazwa urządzenia (model GPU, model dysku, nazwa strefy ACPI, numer kanału `#2`) jest daną; rodzaj czujnika to klucz i18n (`SensorKind` → `module.hw_sensors.sensor.*`). Jednostki i precyzja są w `sk_core::sensors::format_reading`.
@@ -462,6 +473,7 @@ sector::plan(&params).steps(); sector::quick_probes(span); SectorState::map();
 | golden widoku | stabilny kształt raportu (JSON) | `crates/sk-modules/tests/golden.rs` — dopisz swój moduł, jeśli jego widok jest kontraktem |
 | sprzętowy `#[ignore]` | realne WMI na maszynie serwisowej | `crates/sk-modules/tests/hardware.rs` — dopisz swój `id` do listy modułów, jeśli chcesz go tam objąć |
 | sprzętowy ADL/NVML `#[ignore]` | prawdziwe czujniki GPU | `crates/sk-win/src/sensors.rs` — akceptuje brak karty, bo nie każda maszyna ma ADL/NVML |
+| sprzętowy PawnIO `#[ignore]` | temperatura CPU i Super I/O | `crates/sk-win/src/cpu.rs`, `superio.rs` — pomijane bez sterownika; `cargo test -p sk-win --lib -- --ignored hardware` |
 
 Wzorce golden odświeżasz świadomie: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`, potem commit z opisem, dlaczego widok się zmienił.
 

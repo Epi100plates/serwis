@@ -8,17 +8,18 @@
 //! Brak biblioteki sterownika nie jest błędem: karta bez ADL/NVML po prostu nie
 //! ma czujników, a raport działa dalej.
 
-use std::ffi::{CString, c_void};
+use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr;
 
-use sk_core::providers::{NS_WMI, WmiProvider};
+use sk_core::providers::{NS_WMI, SensorProbe, WmiProvider};
 use sk_core::sensors::{DeviceKind, SensorKind, SensorReading};
 use windows::Win32::Foundation::{FreeLibrary, HMODULE};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::LoadLibraryW;
 use windows::Win32::System::Memory::{GetProcessHeap, HEAP_ZERO_MEMORY, HeapAlloc};
-use windows::core::{PCSTR, w};
+use windows::core::w;
 
+use crate::ffi::symbol;
 use crate::wmi::WinWmi;
 
 /// Temperatury z ADL są w stopniach Celsjusza; powyżej tej granicy uznalibyśmy
@@ -509,16 +510,6 @@ fn valid_temperature(celsius: f64) -> bool {
     celsius.is_finite() && celsius > 0.0 && celsius < MAX_TEMPERATURE_C
 }
 
-fn symbol<T: Copy>(module: HMODULE, name: &str) -> Option<T> {
-    let name = CString::new(name).ok()?;
-    // SAFETY: `name` jest zakończone NUL; uchwyt biblioteki jest prawidłowy.
-    let procedure = unsafe { GetProcAddress(module, PCSTR(name.as_ptr().cast())) }?;
-    debug_assert_eq!(size_of::<T>(), size_of_val(&procedure));
-    // SAFETY: wszystkie wskaźniki funkcji ADL mają ten sam rozmiar co `FARPROC`;
-    // wołający podaje typ zgodny z deklaracją w `adl_sdk.h`.
-    Some(unsafe { std::mem::transmute_copy(&procedure) })
-}
-
 // ---------------------------------------------------------------------------
 // NVIDIA NVML
 // ---------------------------------------------------------------------------
@@ -745,14 +736,44 @@ impl Drop for Nvml {
 // Publiczny dostawca
 // ---------------------------------------------------------------------------
 
-/// Wszystkie czujniki dostępne bez sterownika ring 0.
+/// Wszystkie czujniki dostępne na tej maszynie.
 ///
 /// Kolejność źródeł jest stała, więc raport jest powtarzalny. Błąd jednego
-/// źródła nie zabiera pozostałych: brak ADL/NVML to po prostu brak odczytów.
+/// źródła nie zabiera pozostałych: brak ADL/NVML/PawnIO to po prostu brak
+/// odczytów, a nie błąd modułu.
 pub struct WinSensors {
     wmi: WinWmi,
     adl: Option<Adl>,
     nvml: Option<Nvml>,
+    ring0: Ring0,
+}
+
+/// Czujniki wymagające ring 0 (PawnIO). Oba pola są opcjonalne: sterownik może
+/// nie być zainstalowany albo płyta nie mieć Super I/O.
+#[derive(Default)]
+struct Ring0 {
+    cpu: Option<crate::cpu::CpuSensors>,
+    board: Option<crate::superio::SuperIo>,
+}
+
+impl Ring0 {
+    fn new() -> Self {
+        Self {
+            cpu: crate::cpu::CpuSensors::probe(),
+            board: crate::superio::SuperIo::probe(),
+        }
+    }
+
+    fn readings(&self) -> Vec<SensorReading> {
+        let mut readings = Vec::new();
+        if let Some(cpu) = &self.cpu {
+            readings.extend(cpu.readings());
+        }
+        if let Some(board) = &self.board {
+            readings.extend(board.readings());
+        }
+        readings
+    }
 }
 
 impl Default for WinSensors {
@@ -767,6 +788,7 @@ impl WinSensors {
             wmi: WinWmi::new(),
             adl: Adl::load(),
             nvml: Nvml::load(),
+            ring0: Ring0::new(),
         }
     }
 
@@ -781,6 +803,16 @@ impl WinSensors {
         }
     }
 
+    /// Stan źródeł dla notek modułu: czy PawnIO jest zainstalowany i czy
+    /// czujniki CPU oraz Super I/O odpowiadają.
+    pub fn probe(&self) -> SensorProbe {
+        SensorProbe {
+            ring0: crate::pawnio::is_installed(),
+            cpu: self.ring0.cpu.is_some(),
+            board: self.ring0.board.is_some(),
+        }
+    }
+
     pub fn readings(&self) -> Vec<SensorReading> {
         let mut readings = Vec::new();
         if let Some(adl) = &self.adl {
@@ -791,6 +823,7 @@ impl WinSensors {
         }
         readings.extend(self.acpi_zones());
         readings.extend(self.battery());
+        readings.extend(self.ring0.readings());
         readings
     }
 

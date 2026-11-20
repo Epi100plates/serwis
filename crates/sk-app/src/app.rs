@@ -1197,6 +1197,7 @@ fn worker_loop(
     // kadencję 1 s i zasilają wykres temperatur w `hw.sensors`.
     let sensor_probe = WinSensors::new();
     let mut sensors = SensorStore::new(LIVE_HISTORY_CAPACITY);
+    sensors.set_probe(sensor_probe.probe());
     // Magazyn skanu sektorów przychodzi z zewnątrz (wspólny `SectorStore`),
     // żeby wątek skanu i moduł `storage.sectors` widziały ten sam stan.
     let started = Instant::now();

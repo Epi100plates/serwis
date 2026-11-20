@@ -10,8 +10,8 @@ use crate::i18n::Locale;
 use crate::live::LiveSample;
 use crate::module::CollectCtx;
 use crate::providers::{
-    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SensorsSource,
-    SmartData, StorageProbe, WmiProvider,
+    AdapterMemory, Clock, Firmware, HostEnv, LiveSource, MachineInfo, PhysicalDrive, SensorProbe,
+    SensorsSource, SmartData, StorageProbe, WmiProvider,
 };
 use crate::sector::{SectorSource, SectorState};
 use crate::sensors::{SensorReading, SensorSample};
@@ -192,11 +192,18 @@ impl LiveSource for MockLive {
 #[derive(Debug, Clone, Default)]
 pub struct MockSensors {
     samples: Vec<SensorSample>,
+    probe: SensorProbe,
 }
 
 impl MockSensors {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Stan źródeł — do testów notek o brakującym sterowniku.
+    pub fn with_probe(mut self, probe: SensorProbe) -> Self {
+        self.probe = probe;
+        self
     }
 
     /// Jedna próbka — tyle wystarczy do tabeli; statystyki będą puste.
@@ -221,6 +228,10 @@ impl SensorsSource for MockSensors {
 
     fn history(&self) -> Vec<SensorSample> {
         self.samples.clone()
+    }
+
+    fn probe(&self) -> SensorProbe {
+        self.probe
     }
 }
 

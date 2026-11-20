@@ -47,7 +47,12 @@ pub enum SensorKind {
     FanRpm,
     /// Wypełnienie PWM wentylatora w procentach.
     FanPercent,
+    /// Temperatura matrycy CCD (AMD) — osobny czujnik od Tctl/Tdie.
+    CcdTemp,
+    /// Napięcie rdzenia GPU albo CPU.
     Voltage,
+    /// Napięcie SoC (AMD) — osobne od napięcia rdzenia.
+    SocVoltage,
     Power,
     Load,
     /// Taktowanie rdzenia w MHz.
@@ -59,10 +64,12 @@ pub enum SensorKind {
 impl SensorKind {
     pub fn unit(self) -> SensorUnit {
         match self {
-            Self::Temperature | Self::Hotspot | Self::MemoryTemp => SensorUnit::Celsius,
+            Self::Temperature | Self::Hotspot | Self::MemoryTemp | Self::CcdTemp => {
+                SensorUnit::Celsius
+            }
             Self::FanRpm => SensorUnit::Rpm,
             Self::FanPercent | Self::Load => SensorUnit::Percent,
-            Self::Voltage => SensorUnit::Volt,
+            Self::Voltage | Self::SocVoltage => SensorUnit::Volt,
             Self::Power => SensorUnit::Watt,
             Self::CoreClock | Self::MemoryClock => SensorUnit::Megahertz,
         }
@@ -70,7 +77,10 @@ impl SensorKind {
 
     /// Czy odczyt jest temperaturą — tylko takie serie trafiają na wykres.
     pub fn is_temperature(self) -> bool {
-        matches!(self, Self::Temperature | Self::Hotspot | Self::MemoryTemp)
+        matches!(
+            self,
+            Self::Temperature | Self::Hotspot | Self::MemoryTemp | Self::CcdTemp
+        )
     }
 }
 
@@ -168,6 +178,7 @@ impl SensorSample {
 pub struct SensorStore {
     capacity: usize,
     samples: VecDeque<SensorSample>,
+    probe: crate::providers::SensorProbe,
 }
 
 impl SensorStore {
@@ -176,7 +187,13 @@ impl SensorStore {
         Self {
             capacity: capacity.max(1),
             samples: VecDeque::new(),
+            probe: crate::providers::SensorProbe::default(),
         }
+    }
+
+    /// Stan źródeł z transportu — moduł czyta go, żeby dobrać notkę.
+    pub fn set_probe(&mut self, probe: crate::providers::SensorProbe) {
+        self.probe = probe;
     }
 
     pub fn push(&mut self, elapsed_secs: f64, readings: Vec<SensorReading>) {
@@ -224,6 +241,10 @@ impl crate::providers::SensorsSource for SensorStore {
 
     fn history(&self) -> Vec<SensorSample> {
         self.samples.iter().cloned().collect()
+    }
+
+    fn probe(&self) -> crate::providers::SensorProbe {
+        self.probe
     }
 }
 
@@ -306,5 +327,34 @@ mod tests {
             SensorKind::Temperature,
             40.0
         )));
+    }
+
+    #[test]
+    fn new_sensor_kinds_keep_thermals_and_volts_apart() {
+        assert_eq!(
+            reading(SensorKind::CcdTemp, 55.5).unit(),
+            SensorUnit::Celsius
+        );
+        assert!(SensorKind::CcdTemp.is_temperature());
+        assert_eq!(
+            reading(SensorKind::SocVoltage, 1.0).unit(),
+            SensorUnit::Volt
+        );
+        assert!(!SensorKind::SocVoltage.is_temperature());
+    }
+
+    #[test]
+    fn store_exposes_probe_state() {
+        use crate::providers::{SensorProbe, SensorsSource};
+
+        let mut store = SensorStore::new(1);
+        assert_eq!(store.probe(), SensorProbe::default());
+        store.set_probe(SensorProbe {
+            ring0: true,
+            cpu: true,
+            board: false,
+        });
+        assert!(store.probe().ring0);
+        assert_eq!(store.samples().len(), 0);
     }
 }

@@ -1,6 +1,6 @@
 # SerwisKit — plan działania
 
-Dokument roboczy (stan: 2026‑11‑19). Wersja: 1.0. Nazwa kodowa: **SerwisKit** (zmienialna, patrz §11).
+Dokument roboczy (stan: 2026‑11‑20). Wersja: 1.0. Nazwa kodowa: **SerwisKit** (zmienialna, patrz §11).
 
 ---
 
@@ -42,7 +42,7 @@ Dwa tryby użycia tej samej logiki:
 
 | Funkcja AIDA64/HWiNFO | Dlaczego nie w v1 |
 |---|---|
-| Temperatury rdzeni CPU, napięcia CPU, obroty z EC/SMBus | Wymaga kodu w ring 0 (MSR/SMBus/EC). WMI tego nie wystawia i nie wystawi. **Decyzja z 2026‑11‑18: wchodzi w Fazie 5 jako helper .NET z LibreHardwareMonitorLib + PawnIO** (podpisany driver, nie WinRing0 — ten jest na liście blokowanych, CVE‑2020‑14979). W wersji 1.0 raport mówi wprost: „temperatura rdzeni wymaga modułu sensorów”. |
+| Wentylatory z EC w laptopach i nazwy kanałów Super I/O per płyta | Wentylatory desktopowe działają przez PawnIO (Super I/O), ale mapa „który nagłówek to CPU/pompa” jest zależna od modelu płyty — bez tabeli płyt pokazujemy numery kanałów. EC laptopów wymaga tabel per model, których nie mamy jak zweryfikować. |
 | Obejście App‑Bound Encryption Chrome (v20) przez `IElevator`/wstrzykiwanie DLL | To sygnatura infostealera — AV/EDR to oznaczy, a zaufanie do narzędzia serwisowego znika. Hasła z Chrome: tylko legalne ścieżki (§6.3). |
 | Cloud, konta, telemetria, wysyłka danych | Narzędzie pracuje offline. Zero ruchu sieciowego z danymi klienta. |
 | Linux/macOS | Poza zakresem; architektura (trait + provider) nie zamyka drzwi, ale nie robimy tego teraz. |
@@ -209,7 +209,7 @@ Legenda uprawnień: **U** = zwykły użytkownik, **A** = administrator, **D** = 
 | Rozszerzenia | ID + reinstalacja z Web Store; `Local Extension Settings` przy zgodnej wersji | U | 3 |
 | Migracja plików użytkownika (foldery osobiste), lista programów | system plików, rejestr `Uninstall` | U | 4 |
 | Czujniki user mode: temperatury, wentylatory, moc i taktowanie GPU, strefy ACPI, bateria, temperatury dysków | AMD ADL (PMLog/OverdriveN), NVIDIA NVML, `MSAcpi_ThermalZoneTemperature`, `BatteryStatus`, SMART NVMe/ATA | U (dyski: A) | 2 (zrobione) |
-| Temperatury rdzeni CPU, napięcia CPU, wentylatory z EC/SMBus | driver (PawnIO/LHM lub własny KMDF) | A + driver | 5 (opcjonalnie) |
+| Temperatury rdzeni CPU, napięcia CPU, moc pakietu, wentylatory i temperatury płyty (Super I/O) | PawnIO (podpisany driver) + moduły `AMDFamily17`/`LpcIO`/`IntelMSR`; klient w `sk-win/src/pawnio.rs` | U (sterownik instaluje technik) | 2 (zrobione) |
 
 Uwaga o SMART przez USB: mostki USB‑SATA często nie przekazują SMART, a NVMe po USB nie ma health logu. Moduł ma to zgłaszać jako „niedostępne przez ten mostek”, nie jako błąd.
 
@@ -398,25 +398,19 @@ Zrealizowane:
 
 Foldery osobiste z mapowaniem ścieżek, lista programów (rejestr `Uninstall`), rozmiary i sumy kontrolne, wznawianie po przerwaniu, raport „co przenieść ręcznie”.
 
-### Faza 5 — Sensory głębokie: helper LibreHardwareMonitor + PawnIO (zaplanowana)
+### Faza 5 — Sensory głębokie: klient PawnIO (zrobione 2026‑11‑20)
 
-**Stan 2026‑11‑19: część user mode zrobiona w module `hw.sensors`.** Bez sterownika działają: temperatura rdzenia i hotspot GPU, wentylator (RPM i PWM), moc, napięcie, taktowania i obciążenie GPU (AMD ADL — PMLog na RDNA2+, fallback OverdriveN/OD5; NVIDIA NVML), strefy termiczne ACPI, temperatura i napięcie baterii oraz temperatury dysków NVMe/ATA z SMART. Historia 1 s daje min/max/średnią, a temperatury rysują się na wykresie. Potwierdzone na RX 6700 XT: 56 °C, hotspot 60 °C, 663 RPM, 33 W, 502/1990 MHz.
+**Stan 2026‑11‑20: zrobione natywnie w `sk-win`, bez helpera .NET.** `sk-win/src/pawnio.rs` ładuje `PawnIOLib.dll` z instalacji PawnIO i wgrywa podpisane moduły wkompilowane w binarkę (`AMDFamily17.bin`, `LpcIO.bin`, `IntelMSR.bin`, wydanie 0.2.12, LGPL‑2.1). `sk-win/src/cpu.rs` czyta SMN/MSR, a `sk-win/src/superio.rs` — rejestry Nuvoton NCT67xx. Moduł `hw.sensors` pokazuje je razem z GPU, dyskami i baterią; `SensorsSource::probe()` mówi, czy ring 0 i czujniki odpowiadają, więc notka wybiera między „zainstaluj PawnIO” a „ten procesor nie ma czujników”.
 
-Poza zasięgiem user mode pozostaje **temperatura rdzeni CPU** (WMI jej nie wystawia, MSR/SMN wymaga ring 0), napięcia CPU i wentylatory z EC/SMBus — to nadal wymaga helpera z podpisem.
+Dowód na tej maszynie (Ryzen 5 5600, MSI A320M‑A PRO M2, NCT6795D): Tctl 53–62 °C, CCD 45–57 °C, napięcie rdzenia 0,99 V, SoC 1,18 V, moc pakietu 39–54 W; wentylatory 1080 i 1028 RPM, temperatury płyty 42–54 °C, PWM 30 % i 45 %.
 
-Cel: temperatury rdzeni CPU, napięcia, obroty wentylatorów, pobór mocy CPU (RAPL) — to, czego WMI nie daje.
+Poza zakresem zostało: nazwy kanałów Super I/O per model płyty (jest numer nagłówka), wentylatory EC w laptopach oraz ścieżka Intela — kod jest (MSR `0x1A2`/`0x1B1`/`0x198`), ale **nieprzetestowany sprzętowo** (brak maszyny Intela).
 
-Wybrany wariant (decyzja 2026‑11‑18): **helper .NET** jako osobny proces, komunikujący się z `serwiskit` przez stdin/stdout (JSON), korzystający z `LibreHardwareMonitorLib` (MPL‑2.0) i podpisanego `PawnIO` zamiast WinRing0.
+**Widok modułu (2026‑11‑20, po uwagach z GUI).** Odczyty są rozwijane w kategoriach: `Block::Group` (nowy wariant modelu widoku — `CollapsingHeader` w GUI, `<details open>` w HTML) grupuje najpierw po podzespole, potem po rodzaju wielkości (`Procesor → Temperatury / Napięcia / Moc`, `Karta graficzna → Temperatury / Wentylatory / …`, `Płyta główna → Temperatury / Wentylatory`); podzespół z jednym rodzajem (dysk) nie dostaje poziomu pośredniego. Wykres temperatur ma stałą skalę 0–100 °C (`Chart::with_y_range`) i okno 120 s liczone wstecz od najnowszej próbki, więc przebieg wchodzi od prawej krawędzi i przesuwa się w lewo, zamiast rozciągać skalę przy każdym odświeżeniu. Kolory serii pochodzą z jednej palety (`sk_core::view::series_color`) używanej przez GUI i SVG w raporcie, a przy dwóch i więcej seriach oba renderery rysują legendę z nazwą podzespołu — wcześniej kolor linii nie był z niczym powiązany. Zrzuty: `docs/screenshot-sensors-cpu.png` (grupy) i `docs/screenshot-sensors-chart.png` (wykres z legendą).
 
-Zadania:
-1. Proces `lhm-helper` (C#/.NET) publikujący drzewo sensorów jako JSON; wersjonowany kontrakt schematu.
-2. Strona Rust: wykrywanie helpera, timeouty, restart, brak helpera = `Block::Note` w module `hw.sensors` (raport działa dalej).
-3. Instrukcja instalacji PawnIO + ostrzeżenie: wymaga uprawnień administratora i podpisanego drivera.
-4. Testy: brak helpera nie psuje raportu; odpowiedź niezgodna ze schematem jest odrzucana.
+Decyzja 2026‑11‑18 zakładała helper .NET z `LibreHardwareMonitorLib`; zastąpiła ją decyzja 2026‑11‑20: **natywny klient PawnIO**. Powody: zero dodatkowego runtime'u i procesu, brak zależności MPL w drzewie, ten sam podpisany sterownik co w LHM/FanControl. Sterownika nie pobieramy ani nie instalujemy — technik instaluje go z pawnio.eu, a aplikacja tylko go wykrywa (brak = notka, raport działa dalej).
 
-Uwaga licencyjna: LHM jest MPL‑2.0 (kompatybilne z GPL‑3.0), ale helper pozostaje osobnym procesem — nie linkujemy go statycznie.
-
-Akceptacja: na maszynie testowej moduł pokazuje temperaturę CPU i obroty wentylatorów; bez helpera raport nadal jest kompletny poza tą sekcją.
+Akceptacja: spełniona — moduł pokazuje temperaturę rdzeni CPU, napięcia i obroty wentylatorów; bez PawnIO raport jest kompletny poza tymi sekcjami.
 
 ### Faza 6 — Dystrybucja (2–3 dni)
 
@@ -449,7 +443,7 @@ Bramki: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
 | WMI wolne i czasem kłamie (VRAM, status dysku) | średni | cache, źródła alternatywne (DXGI, IOCTL), jawne „źródło danych” w raporcie |
 | Destrukcyjny test zapisu | krytyczny | wyłączony domyślnie, potwierdzenie frazą, blokada dysku systemowego, log audytowy |
 | ABE blokuje hasła Chromium | średni | CSV/eksport przeglądarki, jasna komunikacja, brak obejść |
-| Sterowniki jądra (Faza 5) | wysoki | poza 1.0; jeśli wejdzie — tylko podpisany, udokumentowany, opt‑in |
+| Sterowniki jądra (Faza 5) | wysoki | tylko podpisany PawnIO, instalowany przez technika; aplikacja go nie pobiera ani nie instaluje — brak = notka |
 | Pliki zapisane przez proces elevated mają ACL administratora — użytkownik ich nie otworzy | średni | zapis przez plik tymczasowy + jawne ACL z katalogu użytkownika; test regresyjny w Fazie 1 |
 | RODO przy danych klienta | średni | offline, minimalizacja, szyfrowanie pakietu, log audytowy, docs dla serwisu |
 | Rozjazd dokumentacji i kodu | średni | MODULE_GUIDE aktualizowany w tym samym PR co kontrakt; test kontraktowy i golden pilnują reszty |
@@ -467,7 +461,7 @@ Bramki: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
 | 3 | Hasła | **Firefox pełne, Chromium v10 eksperymentalnie, ABE przez eksport CSV** | walidacja v10 w Fazie 3 na realnym profilu |
 | 4 | Licencja | **GPL‑3.0** (`LICENSE`, SPDX `GPL-3.0-only`) | kod pochodny musi być GPL; zależności: egui MIT/Apache, `age` MIT/Apache, `rusqlite` MIT — kompatybilne |
 | 5 | Język UI | **polski + angielski** (klucze i18n w `pl`/`en`) | test kontraktowy pilnuje kompletności kluczy |
-| 6 | Sensory głębokie | **helper .NET LibreHardwareMonitor + PawnIO w Fazie 5** | poza 1.0; wymaga .NET runtime, admina i podpisanego drivera |
+| 6 | Sensory głębokie | **natywny klient PawnIO (Faza 5, zrobione 2026‑11‑20)** | wymaga podpisanego sterownika PawnIO; bez niego raport działa z notką |
 | 7 | Nazwa | **SerwisKit** | pakiet `serwiskit`, binarka `serwiskit.exe` |
 
 Uwaga do licencji: GPL‑3.0 nie blokuje użycia `age` (MIT/Apache‑2.0), `rusqlite` (MIT), `egui` (MIT/Apache‑2.0) ani dynamicznego wywoływania `nvml.dll`/`atiadlxx.dll` przez FFI. Gdyby projekt miał kiedyś zostać zamknięty, trzeba by przepisać własny kod — nie zmienić licencji.

@@ -4,9 +4,11 @@
 //! moduł nie dotyka tego pliku, a widok da się przetestować jako JSON.
 
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotPoints};
+use egui_plot::{Axis, AxisHints, GridMark, Line, Plot, PlotPoints};
 use sk_core::i18n::Translator;
-use sk_core::view::{Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, Table, View};
+use sk_core::view::{
+    Block, Chart, MapCell, NoteLevel, StatusLevel, SurfaceMap, Table, View, series_color,
+};
 
 pub fn view(ui: &mut egui::Ui, view: &View, translator: &Translator) {
     if view.sections.is_empty() {
@@ -88,6 +90,18 @@ fn block_ui(ui: &mut egui::Ui, block: &Block, translator: &Translator) {
         }
         Block::Chart { chart } => chart_ui(ui, chart, translator),
         Block::Map { map } => map_ui(ui, map),
+        Block::Group { title_key, blocks } => {
+            // Domyślnie otwarta: grupa porządkuje listę, a nie ukrywa odczyty.
+            egui::CollapsingHeader::new(egui::RichText::new(translator.t(title_key)).strong())
+                .id_salt(ui.next_auto_id())
+                .default_open(true)
+                .show(ui, |ui| {
+                    for block in blocks {
+                        block_ui(ui, block, translator);
+                        ui.add_space(4.0);
+                    }
+                });
+        }
     }
 }
 
@@ -193,16 +207,63 @@ pub enum ChartMode {
 /// pokazuje podgląd zrzutu w GUI (`sk-app::app`) — zapisany obrazek ma być
 /// dokładnie tym, co widać na ekranie.
 pub fn chart_plot(ui: &mut egui::Ui, chart: &Chart, height: f32, id_salt: &str, mode: ChartMode) {
+    // Legenda nad wykresem, nie w rogu: dane dochodzą od prawej krawędzi, więc
+    // legenda w narożniku zasłaniałaby najnowsze próbki. Jedna seria ma nazwę
+    // w tytule wykresu — powtarzanie jej w legendzie nic nie wnosi.
+    if chart.series.len() > 1 {
+        chart_legend(ui, chart);
+    }
+
     let mut plot = Plot::new(id_salt)
         .height(height)
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
-        .x_axis_label(chart.x_label.clone())
-        .y_axis_label(chart.y_label.clone());
+        .x_axis_label(chart.x_label.clone());
 
-    if chart.from_zero || chart.y_label == "%" {
-        plot = plot.include_y(0.0);
+    if let (Some(min), Some(max)) = (chart.y_min, chart.y_max) {
+        // Stała skala (np. 0–100 °C): bez niej 50–60 °C zajmuje całą wysokość
+        // i każdy ruch wygląda jak skok o dziesiątki stopni.
+        plot = plot
+            .default_y_bounds(min, max)
+            // Podziałka co 20 jednostek, tylko wewnątrz zakresu. Domyślny krok
+            // przy stałym zakresie dawał linie gęstsze niż 20 px, a egui_plot
+            // pomija etykiety, które się nie mieszczą — na osi zostawała sama
+            // kreska bez liczb. Etykiety na krawędziach (0 i 100) nachodzą na
+            // opisy osi, więc ich nie rysujemy.
+            .y_grid_spacer(|input| {
+                const STEP: f64 = 20.0;
+                let (min, max) = input.bounds;
+                let mut marks = Vec::new();
+                let mut index = (min / STEP).ceil() as i64;
+                loop {
+                    let value = index as f64 * STEP;
+                    if value >= max {
+                        break;
+                    }
+                    if value > min {
+                        marks.push(GridMark {
+                            value,
+                            step_size: STEP,
+                        });
+                    }
+                    index += 1;
+                }
+                marks
+            })
+            // Własna oś Y: domyślna ma 14 px szerokości, więc dłuższe etykiety
+            // („100”) są przycinane do ostatniej cyfry.
+            .custom_y_axes(vec![
+                AxisHints::new(Axis::Y)
+                    .label(chart.y_label.clone())
+                    .min_thickness(30.0)
+                    .formatter(|mark, _range| format!("{:.0}", mark.value)),
+            ]);
+    } else {
+        plot = plot.y_axis_label(chart.y_label.clone());
+        if chart.from_zero || chart.y_label == "%" {
+            plot = plot.include_y(0.0);
+        }
     }
 
     // Stały zakres osi X: wykres ma gotowy układ (np. cały dysk w GB) już przy
@@ -213,7 +274,15 @@ pub fn chart_plot(ui: &mut egui::Ui, chart: &Chart, height: f32, id_salt: &str, 
             // Wartości bezwzględne (pozycja na dysku) muszą mieć jednostkę
             // przy każdym znaczniku — „250” na osi nic nie mówi.
             let unit = chart.x_label.clone();
-            plot = plot.x_axis_formatter(move |mark, _range| format!("{:.0} {unit}", mark.value));
+            plot = plot.x_axis_formatter(move |mark, _range| {
+                // Wartości tuż przy zerze dają „-0” przy zaokrąglaniu.
+                let value = if mark.value.abs() < 0.5 {
+                    0.0
+                } else {
+                    mark.value
+                };
+                format!("{value:.0} {unit}")
+            });
         }
     } else if let Some(max) = chart.x_max {
         plot = plot.include_x(max);
@@ -222,13 +291,9 @@ pub fn chart_plot(ui: &mut egui::Ui, chart: &Chart, height: f32, id_salt: &str, 
     plot.show(ui, |plot_ui| {
         for (index, series) in chart.series.iter().enumerate() {
             let points: PlotPoints = series.points.iter().copied().collect();
-            // Kolory jak w raporcie HTML — seria ma być rozpoznawalna w obu miejscach.
-            let color = [
-                egui::Color32::from_rgb(90, 150, 230),
-                egui::Color32::from_rgb(230, 140, 70),
-                egui::Color32::from_rgb(90, 190, 130),
-            ][index % 3];
-            let line = Line::new(series.label.clone(), points).color(color);
+            // Kolory z palety `sk_core` — seria ma być rozpoznawalna w GUI
+            // i w raporcie HTML, a legenda jest jedynym źródłem przypisania.
+            let line = Line::new(series.label.clone(), points).color(series_color32(index));
             let line = if mode == ChartMode::Still {
                 line.allow_hover(false)
             } else {
@@ -237,6 +302,29 @@ pub fn chart_plot(ui: &mut egui::Ui, chart: &Chart, height: f32, id_salt: &str, 
             plot_ui.line(line);
         }
     });
+}
+
+/// Próbka koloru i nazwa serii. Ta sama kolejność i paleta co w raporcie HTML.
+fn chart_legend(ui: &mut egui::Ui, chart: &Chart) {
+    ui.horizontal_wrapped(|ui| {
+        for (index, series) in chart.series.iter().enumerate() {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 3.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 1.0, series_color32(index));
+            ui.label(egui::RichText::new(&series.label).small());
+            ui.add_space(10.0);
+        }
+    });
+}
+
+/// Kolor serii z palety `sk_core` (zapis `#rrggbb`) jako kolor egui.
+fn series_color32(index: usize) -> egui::Color32 {
+    let hex = series_color(index).trim_start_matches('#');
+    let channel = |offset: usize| {
+        hex.get(offset..offset + 2)
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+            .unwrap_or(128)
+    };
+    egui::Color32::from_rgb(channel(0), channel(2), channel(4))
 }
 
 #[cfg(test)]
@@ -359,6 +447,55 @@ mod tests {
             harness.run_steps(2);
             harness.get_by_label("Mapa powierzchni");
         }
+    }
+
+    #[test]
+    fn renders_group_as_expandable_header_with_contents() {
+        let translator = Translator::load().expect("tłumaczenia się wczytują");
+        let model = View::new(vec![Section::new("module.hw_sensors.section").with_blocks(
+            vec![Block::group(
+                "module.hw_sensors.group.fan",
+                vec![Block::Table {
+                    table: Table::new(
+                        vec!["module.hw_sensors.col.value".to_string()],
+                        vec![vec!["1024 RPM".to_string()]],
+                    ),
+                }],
+            )],
+        )]);
+
+        let mut harness = Harness::new_ui(|ui| view(ui, &model, &translator));
+        harness.run_steps(2);
+
+        // Nagłówek grupy i jej zawartość są widoczne bez rozwijania.
+        harness.get_by_label("Wentylatory");
+        harness.get_by_label("1024 RPM");
+    }
+
+    #[test]
+    fn chart_legend_names_every_series() {
+        let translator = Translator::load().expect("tłumaczenia się wczytują");
+        let model = View::new(vec![Section::new("module.hw_sensors.section").with_blocks(
+            vec![Block::chart(
+                Chart::new("module.hw_sensors.chart.temperature", "s", "°C")
+                    .with_y_range(0.0, 100.0)
+                    .with_x_range(-120.0, 0.0)
+                    .with_series(vec![
+                        ChartSeries::new("AMD Ryzen 5 5600", vec![[-1.0, 50.0], [0.0, 55.0]]),
+                        ChartSeries::new(
+                            "AMD Radeon RX 6700 XT",
+                            vec![[-1.0, 48.0], [0.0, 52.0]],
+                        ),
+                    ]),
+            )],
+        )]);
+
+        let mut harness = Harness::new_ui(|ui| view(ui, &model, &translator));
+        harness.run_steps(3);
+
+        // Bez legendy kolor linii nie mówił, który podzespół jest który.
+        harness.get_by_label("AMD Ryzen 5 5600");
+        harness.get_by_label("AMD Radeon RX 6700 XT");
     }
 
     #[test]

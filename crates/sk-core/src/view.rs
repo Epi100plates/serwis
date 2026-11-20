@@ -59,36 +59,46 @@ impl Section {
     fn collect_keys(&self, out: &mut Vec<String>) {
         out.push(self.title_key.clone());
         for block in &self.blocks {
-            match block {
-                Block::KeyValues { rows } => {
-                    for row in rows {
-                        out.push(row.label_key.clone());
-                        if let Some(value_key) = &row.value_key {
-                            out.push(value_key.clone());
-                        }
-                    }
-                }
-                Block::Table { table } => {
-                    out.extend(table.headers.iter().cloned());
-                    for cells in &table.value_keys {
-                        out.extend(cells.iter().flatten().cloned());
-                    }
-                }
-                Block::Note { text_key, .. } | Block::Badge { text_key } => {
-                    out.push(text_key.clone());
-                }
-                Block::Status {
-                    label_key,
-                    value_key,
-                    ..
-                } => {
-                    out.push(label_key.clone());
+            collect_block_keys(block, out);
+        }
+    }
+}
+
+fn collect_block_keys(block: &Block, out: &mut Vec<String>) {
+    match block {
+        Block::KeyValues { rows } => {
+            for row in rows {
+                out.push(row.label_key.clone());
+                if let Some(value_key) = &row.value_key {
                     out.push(value_key.clone());
                 }
-                // Etykiety serii są danymi („CPU 1”), nie tekstem interfejsu.
-                Block::Chart { chart } => out.push(chart.title_key.clone()),
-                // Mapa powierzchni nie ma tekstu — komórki to dana, nie etykiety.
-                Block::Map { .. } => {}
+            }
+        }
+        Block::Table { table } => {
+            out.extend(table.headers.iter().cloned());
+            for cells in &table.value_keys {
+                out.extend(cells.iter().flatten().cloned());
+            }
+        }
+        Block::Note { text_key, .. } | Block::Badge { text_key } => {
+            out.push(text_key.clone());
+        }
+        Block::Status {
+            label_key,
+            value_key,
+            ..
+        } => {
+            out.push(label_key.clone());
+            out.push(value_key.clone());
+        }
+        // Etykiety serii są danymi („CPU 1”), nie tekstem interfejsu.
+        Block::Chart { chart } => out.push(chart.title_key.clone()),
+        // Mapa powierzchni nie ma tekstu — komórki to dana, nie etykiety.
+        Block::Map { .. } => {}
+        Block::Group { title_key, blocks } => {
+            out.push(title_key.clone());
+            for block in blocks {
+                collect_block_keys(block, out);
             }
         }
     }
@@ -117,6 +127,13 @@ pub enum Block {
     /// Mapa powierzchni: siatka komórek w kolejności rosnących offsetów.
     /// Tak HD Tune pokazuje wynik Error Scan — zielone i czerwone kwadraty.
     Map { map: SurfaceMap },
+    /// Zwinięta grupa bloków: nagłówek rozwijany w GUI (`<details>` w HTML).
+    /// Służy do dzielenia długiej listy na kategorie, nie do ukrywania danych —
+    /// renderer otwiera grupy domyślnie.
+    Group {
+        title_key: String,
+        blocks: Vec<Block>,
+    },
 }
 
 impl Block {
@@ -157,6 +174,15 @@ impl Block {
 
     pub fn map(map: SurfaceMap) -> Self {
         Self::Map { map }
+    }
+
+    /// Grupa bloków pod wspólnym, rozwijanym nagłówkiem (kategoria czujników,
+    /// sekcja dysku). Pusta grupa nie wnosi nic, więc renderer jej nie pokazuje.
+    pub fn group(title_key: impl Into<String>, blocks: Vec<Block>) -> Self {
+        Self::Group {
+            title_key: title_key.into(),
+            blocks,
+        }
     }
 }
 
@@ -244,6 +270,14 @@ pub struct Chart {
     /// próbka — zamiast rozciągać się z każdym nowym punktem.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x_max: Option<f64>,
+    /// Stały początek osi Y — temperatury zawsze mają 0, żeby 40 °C nie
+    /// wyglądało jak dno skali.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_min: Option<f64>,
+    /// Stały koniec osi Y (np. 100 °C). Bez tego seria 45–60 °C rozciąga się na
+    /// całą wysokość i chwilowy skok wygląda jak skok o sto stopni.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_max: Option<f64>,
     pub series: Vec<ChartSeries>,
 }
 
@@ -264,6 +298,8 @@ impl Chart {
             from_zero: false,
             x_min: None,
             x_max: None,
+            y_min: None,
+            y_max: None,
             series: Vec::new(),
         }
     }
@@ -286,6 +322,16 @@ impl Chart {
         self
     }
 
+    /// Ustawia stały zakres osi Y (np. 0–100 °C). Bez tego seria 45–60 °C
+    /// rozciąga się na całą wysokość i chwilowy skok wygląda jak skok termiczny.
+    pub fn with_y_range(mut self, min: f64, max: f64) -> Self {
+        if min.is_finite() && max.is_finite() && max > min {
+            self.y_min = Some(min);
+            self.y_max = Some(max);
+        }
+        self
+    }
+
     pub fn with_series(mut self, series: Vec<ChartSeries>) -> Self {
         self.series = series;
         self
@@ -293,6 +339,22 @@ impl Chart {
 
     pub fn is_empty(&self) -> bool {
         self.series.iter().all(|series| series.points.is_empty())
+    }
+}
+
+/// Kolory serii wspólne dla GUI i raportu HTML — ten sam podzespół ma ten sam
+/// kolor w obu miejscach, a legenda jest jedynym źródłem przypisania.
+pub const SERIES_COLORS: [&str; 6] = [
+    "#1a5fb4", "#c64600", "#26a269", "#a51d2d", "#9141ac", "#5e5c64",
+];
+
+/// Kolor serii wg jej pozycji na wykresie. Poza paletą wracamy do pierwszego
+/// koloru, żeby legenda nigdy nie pokazała dwóch identycznych wpisów bez pary.
+pub fn series_color(index: usize) -> &'static str {
+    if index < SERIES_COLORS.len() {
+        SERIES_COLORS[index]
+    } else {
+        SERIES_COLORS[0]
     }
 }
 
@@ -611,5 +673,71 @@ mod tests {
         assert_eq!(broken.x_max, None);
         let nan = Chart::new("test.chart", "GB", "MB/s").with_x_range(0.0, f64::NAN);
         assert_eq!(nan.x_max, None);
+    }
+
+    #[test]
+    fn chart_y_range_is_serialized_only_when_valid() {
+        let plain = Chart::new("test.chart", "s", "°C");
+        let json = serde_json::to_value(&plain).expect("json");
+        assert!(json.get("y_min").is_none(), "{json}");
+        assert!(json.get("y_max").is_none(), "{json}");
+
+        let chart = Chart::new("test.chart", "s", "°C").with_y_range(0.0, 100.0);
+        let json = serde_json::to_value(&chart).expect("json");
+        assert_eq!(json["y_min"], 0.0);
+        assert_eq!(json["y_max"], 100.0);
+        let back: Chart = serde_json::from_value(json).expect("odczyt wykresu");
+        assert_eq!(back.y_min, Some(0.0));
+        assert_eq!(back.y_max, Some(100.0));
+
+        let broken = Chart::new("test.chart", "s", "°C").with_y_range(100.0, 100.0);
+        assert_eq!(broken.y_max, None);
+    }
+
+    #[test]
+    fn groups_collect_nested_keys_and_roundtrip() {
+        let view = View::new(vec![Section::new("test.section").with_blocks(vec![
+            Block::group(
+                "test.group.cpu",
+                vec![Block::group(
+                    "test.group.cpu_temp",
+                    vec![Block::Table {
+                        table: Table::new(
+                            vec!["test.col".to_string()],
+                            vec![vec!["55.0 °C".to_string()]],
+                        ),
+                    }],
+                )],
+            ),
+        ])]);
+
+        assert!(view.uses_key("test.group.cpu"));
+        assert!(view.uses_key("test.group.cpu_temp"));
+        assert!(view.uses_key("test.col"));
+
+        let json = serde_json::to_string(&view).expect("serializacja widoku");
+        let back: View = serde_json::from_str(&json).expect("deserializacja widoku");
+        assert_eq!(view, back);
+        let json = serde_json::to_value(&view).expect("json");
+        assert_eq!(json["sections"][0]["blocks"][0]["kind"], "group");
+        assert_eq!(
+            json["sections"][0]["blocks"][0]["blocks"][0]["kind"],
+            "group"
+        );
+    }
+
+    #[test]
+    fn series_colors_are_stable_and_wrap_safely() {
+        assert_eq!(series_color(0), SERIES_COLORS[0]);
+        assert_eq!(series_color(5), SERIES_COLORS[5]);
+        // Poza paletą nie może pojawić się indeks spoza tablicy.
+        assert_eq!(series_color(99), SERIES_COLORS[0]);
+        assert_eq!(
+            SERIES_COLORS.len(),
+            SERIES_COLORS
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        );
     }
 }

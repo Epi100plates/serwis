@@ -103,6 +103,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
     let live = sk_core::live::LiveHistory::new(1);
     let sensor_probe = WinSensors::new();
     let mut sensors = sk_core::sensors::SensorStore::new(1);
+    sensors.set_probe(sensor_probe.probe());
     let sectors = sk_core::sector::IdleSectors;
     // Benchmark nie jest częścią raportu: trwa minuty i wymaga jawnego startu
     // w GUI, dlatego raport widzi stan bezczynny.
