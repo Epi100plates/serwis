@@ -47,17 +47,25 @@ jobs:
           } else {
             $line = Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
             $tag = 'v' + $line.Matches[0].Groups[1].Value
-            if (-not (git rev-parse -q --verify "refs/tags/$tag")) {
-              Write-Output "Tag $tag nie istnieje - nie ma czego wydawac"
+          }
+          if (-not (git rev-parse -q --verify "refs/tags/$tag")) {
+            Write-Output "Tag $tag nie istnieje - nie ma czego wydawac"
+            "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $json | ConvertFrom-Json
+            Write-Output "Wydanie $tag: draft=$($release.draft) prerelease=$($release.prerelease) assets=$($release.assets.Count) url=$($release.html_url)"
+            if (-not $release.draft) {
+              Write-Output "Wydanie $tag jest opublikowane - nic do zrobienia"
               "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               exit 0
             }
-            gh release view $tag *> $null
-            if ($LASTEXITCODE -eq 0) {
-              Write-Output "Wydanie $tag juz istnieje"
-              "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              exit 0
-            }
+            Write-Output "Wydanie $tag jest szkicem - publikuje je"
+            gh release edit $tag --draft=false
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          } else {
             Write-Output "Wydanie $tag brakuje - publikuje z commita $(git rev-parse --short "$tag^{commit}")"
           }
           "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
