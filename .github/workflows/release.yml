@@ -56,6 +56,13 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             $release = $state | ConvertFrom-Json
             Write-Output "Wydanie ${tag}: draft=$($release.isDraft) assets=$($release.assets.Count)"
+            # Wydanie z workflow tokenu powstaje jako szkic - bez tego kroku zostaje
+            # niewidoczne publicznie (API bez uprawnień zapisu zwraca 404).
+            if ($release.isDraft) {
+              Write-Output "Wydanie $tag jest szkicem - publikuje go"
+              gh release edit $tag --draft=false
+              if ($LASTEXITCODE -ne 0) { exit 1 }
+            }
             if ($release.assets.Count -ge 3) {
               Write-Output "Wydanie $tag jest kompletne - nic do zrobienia"
               "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -120,5 +127,7 @@ jobs:
           $extra = @()
           if ($env:VER.StartsWith('0.')) { $extra += '--prerelease' }
           gh release create $env:TAG --title "SerwisKit $env:VER" --notes-file CHANGELOG.md --verify-tag @extra "dist/serwiskit-$env:VER-windows-x64.zip" dist/SHA256SUMS.txt dist/serwiskit.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release edit $env:TAG --draft=false
           if ($LASTEXITCODE -ne 0) { exit 1 }
           gh release view $env:TAG --json tagName,isDraft,isPrerelease,assets
