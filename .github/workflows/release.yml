@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
@@ -12,36 +13,83 @@ on:
 permissions:
   contents: write
 
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   release:
     name: Build + ZIP + GitHub Release
     runs-on: windows-latest
     env:
       CARGO_TERM_COLOR: always
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      INPUT_TAG: ${{ inputs.tag }}
-      REF_NAME: ${{ github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Trzy drogi: tag `v*`, push na `main` (publikuje, gdy brakuje wydania dla wersji
+      # z Cargo.toml — tak naprawia się wydanie bez ruszania tagu, bo GitHub usuwa
+      # wydanie przy każdej zmianie refu tagu) i ręczne uruchomienie.
+      - name: Który tag i czy publikować
+        id: decide
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = ''
+          if ($env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG
+          } elseif ($env:REF_NAME -like 'v*') {
+            $tag = $env:REF_NAME
+          } else {
+            $line = Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+            $tag = 'v' + $line.Matches[0].Groups[1].Value
+            if (-not (git rev-parse -q --verify "refs/tags/$tag")) {
+              Write-Output "Tag $tag nie istnieje - nie ma czego wydawac"
+              "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              exit 0
+            }
+            gh release view $tag *> $null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Output "Wydanie $tag juz istnieje"
+              "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              exit 0
+            }
+            Write-Output "Wydanie $tag brakuje - publikuje z commita $(git rev-parse --short "$tag^{commit}")"
+          }
+          "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # Na pushu do main budujemy z commita tagu, nie z HEAD - inaczej artefakt nie
+      # odpowiada wydaniu.
+      - name: Checkout commita tagu
+        if: steps.decide.outputs.publish == 'true' && github.ref_type != 'tag'
+        run: git checkout ${{ steps.decide.outputs.tag }}
 
       - name: Toolchain
+        if: steps.decide.outputs.publish == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.99.1
 
       - name: Cache
+        if: steps.decide.outputs.publish == 'true'
         uses: Swatinem/rust-cache@v2
 
       - name: Build release
+        if: steps.decide.outputs.publish == 'true'
         run: cargo build --release
 
       - name: Pakowanie i sumy
+        if: steps.decide.outputs.publish == 'true'
         shell: pwsh
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
         run: |
-          $tag = $env:INPUT_TAG
-          if (-not $tag) { $tag = $env:REF_NAME }
-          $ver = $tag.TrimStart('v')
+          $ver = $env:TAG.TrimStart('v')
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/serwiskit.exe dist
           Copy-Item LICENSE, README.md dist
@@ -51,12 +99,14 @@ jobs:
             "$((Get-FileHash "dist/$n" -Algorithm SHA256).Hash.ToLower())  $n"
           }
           [System.IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", (($sums -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
           "VER=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
           Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: GitHub Release
+        if: steps.decide.outputs.publish == 'true'
         shell: pwsh
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
         run: |
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {

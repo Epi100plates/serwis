@@ -416,7 +416,7 @@ Akceptacja: spełniona — moduł pokazuje temperaturę rdzeni CPU, napięcia i 
 
 Portable ZIP + instalator (Inno Setup lub NSIS), podpis Authenticode (bez podpisu Smart App Control blokuje nieznane aplikacje na czystym Win11), GitHub Releases, CHANGELOG, wersjonowanie SemVer.
 
-**Zrealizowane (2026‑11‑20):** wydanie `v0.1.0` w GitHub Releases — portable ZIP z `serwiskit.exe`, `LICENSE` i `README.md` plus suma SHA‑256; wersja bierze się z `workspace.package.version`. Publikuje je `.github/workflows/release.yml` (push tagu `v*`: build w CI, ZIP, sumy, Release z treści `CHANGELOG.md`), więc plik nie zależy od lokalnej maszyny. README nie zawiera już zrzutów ekranu — opis modułów jest w tabeli, a zrzuty zostają w `docs/` jako dowody w PLAN i AGENTS. Zostało: podpis Authenticode i instalator.
+**Zrealizowane (2026‑11‑20):** wydanie `v0.1.0` w GitHub Releases — portable ZIP z `serwiskit.exe`, `LICENSE` i `README.md` plus suma SHA‑256; wersja bierze się z `workspace.package.version`. Publikuje je `.github/workflows/release.yml` (push tagu `v*`: build w CI, ZIP, sumy, Release z treści `CHANGELOG.md`), więc plik nie zależy od lokalnej maszyny i nie wymaga tokenu z prawem zapisu u developera. Workflow reaguje też na push do `main`: gdy dla wersji z `Cargo.toml` nie ma wydania, buduje z commita tagu i publikuje — to jedyny sposób odtworzenia wydania, bo zmiana refu tagu (kasowanie albo force‑push) usuwa wydanie po stronie GitHuba. README nie zawiera już zrzutów ekranu — opis modułów jest w tabeli, a zrzuty zostają w `docs/` jako dowody w PLAN i AGENTS. Zostało: podpis Authenticode i instalator.
 
 ---
 
