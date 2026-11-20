@@ -416,7 +416,7 @@ Akceptacja: spełniona — moduł pokazuje temperaturę rdzeni CPU, napięcia i 
 
 Portable ZIP + instalator (Inno Setup lub NSIS), podpis Authenticode (bez podpisu Smart App Control blokuje nieznane aplikacje na czystym Win11), GitHub Releases, CHANGELOG, wersjonowanie SemVer.
 
-**Zrealizowane (2026‑11‑20):** wydanie `v0.1.0` w GitHub Releases — portable ZIP z `serwiskit.exe`, `LICENSE` i `README.md` plus suma SHA‑256; wersja bierze się z `workspace.package.version`. README nie zawiera już zrzutów ekranu — opis modułów jest w tabeli, a zrzuty zostają w `docs/` jako dowody w PLAN i AGENTS. Zostało: podpis Authenticode, instalator, CHANGELOG.
+**Zrealizowane (2026‑11‑20):** wydanie `v0.1.0` w GitHub Releases — portable ZIP z `serwiskit.exe`, `LICENSE` i `README.md` plus suma SHA‑256; wersja bierze się z `workspace.package.version`. Publikuje je `.github/workflows/release.yml` (push tagu `v*`: build w CI, ZIP, sumy, Release z treści `CHANGELOG.md`), więc plik nie zależy od lokalnej maszyny. README nie zawiera już zrzutów ekranu — opis modułów jest w tabeli, a zrzuty zostają w `docs/` jako dowody w PLAN i AGENTS. Zostało: podpis Authenticode i instalator.
 
 ---
 

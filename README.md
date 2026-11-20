@@ -70,6 +70,8 @@ Cztery pierwsze bramki muszą być zielone przed zgłoszeniem pracy; to samo rob
 
 **Po każdej zmianie commit i `git push origin main`.** Praca, która została tylko lokalnie, nie istnieje — także dla dokumentacji i poprawek w stylu. Szczegóły: [`AGENTS.md`](AGENTS.md) (reguła 12).
 
+Wydanie: push tagu `v*` uruchamia `.github/workflows/release.yml` — build na `windows-latest`, ZIP z `serwiskit.exe`, `LICENSE` i `README.md`, sumy SHA‑256 i GitHub Release z treści [`CHANGELOG.md`](CHANGELOG.md). Wersję podnosi się w `workspace.package.version` i w changelogu, potem tag i push.
+
 Struktura: `sk-core` (kontrakt modułów i widoków, typy testów dyskowych), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, dyski i SMART, odczyt powierzchni, PawnIO), `sk-modules` (moduły i parsery), `sk-app` (binarka `serwiskit`, raport JSON/HTML, GUI i wątki testów).
 
 Stos: Rust 1.99 · egui/eframe 0.37 · egui_plot 0.38 · `windows` 0.62 · `wmi` 0.18 · `serde` · `clap` · `chrono` · `include_dir` · `png`.
