@@ -28,9 +28,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Trzy drogi: tag `v*`, push na `main` (publikuje, gdy brakuje wydania dla wersji
-      # z Cargo.toml — tak naprawia się wydanie bez ruszania tagu, bo GitHub usuwa
-      # wydanie przy każdej zmianie refu tagu) i ręczne uruchomienie.
+      # Trzy drogi: tag `v*`, push na `main` (publikuje, gdy brakuje wydania albo nie ma
+      # ono załączników — tak naprawia się wydanie bez ruszania tagu) i ręczne uruchomienie.
       - name: Który tag i czy publikować
         id: decide
         shell: pwsh
@@ -53,18 +52,16 @@ jobs:
             "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             exit 0
           }
-          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
+          $state = gh release view $tag --json isDraft,assets 2>$null
           if ($LASTEXITCODE -eq 0) {
-            $release = $json | ConvertFrom-Json
-            Write-Output "Wydanie ${tag}: draft=$($release.draft) prerelease=$($release.prerelease) assets=$($release.assets.Count) url=$($release.html_url)"
-            if (-not $release.draft) {
-              Write-Output "Wydanie $tag jest opublikowane - nic do zrobienia"
+            $release = $state | ConvertFrom-Json
+            Write-Output "Wydanie ${tag}: draft=$($release.isDraft) assets=$($release.assets.Count)"
+            if ($release.assets.Count -ge 3) {
+              Write-Output "Wydanie $tag jest kompletne - nic do zrobienia"
               "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               exit 0
             }
-            Write-Output "Wydanie $tag jest szkicem - publikuje je"
-            gh release edit $tag --draft=false
-            if ($LASTEXITCODE -ne 0) { exit 1 }
+            Write-Output "Wydanie $tag nie ma zalacznikow - odtwarzam"
           } else {
             Write-Output "Wydanie $tag brakuje - publikuje z commita $(git rev-parse --short "$tag^{commit}")"
           }
@@ -110,17 +107,18 @@ jobs:
           "VER=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
           Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
 
+      # Wydanie zawsze powstaje od zera z plikami podanymi od razu: `gh release create`
+      # z listą assetów jest jednoznaczny, a osobny upload potrafił zostawić wydanie
+      # bez załączników. `gh release delete` nie kasuje tagu (bez `--cleanup-tag`).
       - name: GitHub Release
         if: steps.decide.outputs.publish == 'true'
         shell: pwsh
         env:
           TAG: ${{ steps.decide.outputs.tag }}
         run: |
-          gh release view $env:TAG *> $null
-          if ($LASTEXITCODE -ne 0) {
-            $extra = @()
-            if ($env:VER.StartsWith('0.')) { $extra += '--prerelease' }
-            gh release create $env:TAG --title "SerwisKit $env:VER" --notes-file CHANGELOG.md --verify-tag @extra
-            if ($LASTEXITCODE -ne 0) { exit 1 }
-          }
-          gh release upload $env:TAG "dist/serwiskit-$env:VER-windows-x64.zip" dist/SHA256SUMS.txt dist/serwiskit.exe --clobber
+          gh release delete $env:TAG --yes --cleanup-tag=false 2>$null
+          $extra = @()
+          if ($env:VER.StartsWith('0.')) { $extra += '--prerelease' }
+          gh release create $env:TAG --title "SerwisKit $env:VER" --notes-file CHANGELOG.md --verify-tag @extra "dist/serwiskit-$env:VER-windows-x64.zip" dist/SHA256SUMS.txt dist/serwiskit.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release view $env:TAG --json tagName,isDraft,isPrerelease,assets
