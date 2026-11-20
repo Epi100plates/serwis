@@ -1,6 +1,6 @@
 # Zmiany w SerwisKit
 
-Wersjonowanie SemVer. Wydanie publikuje workflow [`.github/workflows/release.yml`](.github/workflows/release.yml): buduje `serwiskit.exe` na czystym `windows-latest`, pakuje ZIP, liczy sumy SHA‑256 i tworzy GitHub Release. Uruchamiają go dwa zdarzenia: push tagu `v*` oraz push na `main` — w drugim przypadku tylko wtedy, gdy dla wersji z `Cargo.toml` brakuje wydania (tak odtwarza się wydanie po awarii, bez ruszania tagu). Ten plik jest treścią wydania, więc wpis musi być aktualny **przed** pushnięciem tagu.
+Wersjonowanie SemVer. Wydanie publikuje workflow [`.github/workflows/release.yml`](.github/workflows/release.yml): buduje `serwiskit.exe` na czystym `windows-latest`, pakuje ZIP, liczy sumy SHA‑256 i tworzy GitHub Release. Uruchamiają go dwa zdarzenia: push tagu `v*` oraz push na `main` — w drugim przypadku tylko wtedy, gdy dla wersji z `Cargo.toml` brakuje wydania albo nie ma ono załączników (tak odtwarza się wydanie bez ruszania tagu). Wydanie powstaje jako szkic i workflow publikuje je jawnie. Ten plik jest treścią wydania, więc wpis musi być aktualny **przed** pushnięciem tagu.
 
 ## 0.1.0 — 2026‑11‑20
 
