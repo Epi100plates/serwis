@@ -1,90 +1,51 @@
 # SerwisKit
 
-Narzędzie serwisowe dla Windows 10/11 x64: diagnostyka sprzętu (jak AIDA64), testy dysków i SMART (jak HD Tune / CrystalDiskInfo) oraz migracja profili przeglądarek między komputerami. Jeden plik `.exe`, praca offline, moduły dokładane przez kontrybutorów.
+Narzędzie serwisowe dla Windows 10/11 x64 w Rust z GUI: diagnostyka sprzętu, testy dysków (SMART, prędkość, skan powierzchni) i — w kolejnych fazach — migracja profili przeglądarek. Zastępuje zestaw, który w serwisie wymaga dziś 3–5 programów komercyjnych (AIDA64, HD Tune, CrystalDiskInfo, narzędzia do profili).
 
-Projekt open source. Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI + CLI + jawny rejestr modułów, 14 modułów (telemetria AIDA‑lite, wykresy live, czujniki CPU/GPU/Super I/O/ACPI/baterii i temperatury dysków, SMART NVMe i ATA/SATA, benchmark prędkości powierzchni, skan sektorów) i raport JSON/HTML. Kolejne fazy: `docs/PLAN.md` §8.
+Jeden plik `.exe`, bez instalatora, bez Node i WebView2, zero sieci. Moduły dokładają kontrybutorzy. Licencja **GPL‑3.0‑only**.
 
-![Okno SerwisKit — telemetria na żywo](docs/screenshot.png)
+Status: **Faza 1 ukończona, Faza 2 w toku** — działa GUI, tryb CLI, jawny rejestr modułów (14) i raport JSON/HTML. W Fazie 2 zostały test zapisu (`Destructive`) i wspólny `TaskDescriptor`; dalej migracja przeglądarek i plików oraz dystrybucja (`docs/PLAN.md` §8).
 
-Stan dysków (SMART) w układzie jak CrystalDiskInfo: stan i temperatura każdego nośnika w przeglądzie, baner oceny, wskaźniki z logu zdrowia NVMe lub z atrybutów ATA i pełna tabela atrybutów z oceną każdego z nich:
-
-![Stan dysków (SMART) — przegląd, baner stanu i wskaźniki](docs/screenshot-smart.png)
-
-Tabela atrybutów ATA z kolumną „Ocena” — zrzut z makiety (`MockStorage`), bo kontroler SATA tej maszyny nie przekazuje SMART:
-
-![Tabela atrybutów ATA z oceną — dane syntetyczne](docs/screenshot-smart-ata-synthetic.png)
-
-Benchmark prędkości powierzchni (`storage.bench`) — panel z wyborem dysku i czasu testu (15 s / 30 s / 60 s / bez limitu). Test próbkuje **cały dysk** i mieści się w wybranym czasie, a wykres od razu ma układ całego nośnika z podziałką w GB. Podgląd wykresu zapisuje się do PNG razem z modelem i pojemnością dysku:
-
-![Benchmark prędkości dysku — panel i mapa prędkości](docs/screenshot-bench.png)
-
-![Wykres zapisany do PNG — model dysku, pojemność i mapa prędkości](docs/screenshot-bench-chart.png)
-
-Skan nieczytelnych sektorów (`storage.sectors`) — Error Scan jak w HD Tune: mapa powierzchni i lista nieczytelnych zakresów. Tryb szybki czyta próbki rozrzucone po całym nośniku, dokładny — każdą jednostkę 4 MiB od początku do końca. Zrzut: skan szybki na CT1000MX500 (2,0 GB w 4,2 s, 0 błędów):
-
-![Skan sektorów — mapa powierzchni i wynik skanu szybkiego](docs/screenshot-sectors.png)
-
-Czujniki (`hw.sensors`) — to, co w HWiNFO: temperatury i hotspot GPU, obroty oraz PWM wentylatora, moc, napięcie i taktowania, a do tego temperatury dysków. Odczyty są pogrupowane po podzespole i rodzaju wielkości, a temperatury rysują się na wykresie 0–100 °C z oknem 120 s: nowe próbki wchodzą od prawej krawędzi, a legenda przypisuje kolor do podzespołu.
-
-![Czujniki — grupy odczytów CPU i GPU](docs/screenshot-sensors-cpu.png)
-
-![Czujniki — wykres temperatur z legendą i stałą skalą](docs/screenshot-sensors-chart.png)
-
-Czujniki CPU i płyty wymagają sterownika PawnIO — wtedy dochodzą rdzenie (Tctl/Tdie, CCD), napięcia i moc pakietu CPU oraz wentylatory i temperatury Super I/O. Min/Maks/Średnia liczą się z próbek co sekundę.
-
-Raport HTML wygenerowany tym samym zbieraniem danych co GUI (zrzut: `docs/report.png`).
-
-## Dlaczego
-
-W serwisie komputerowym ta sama czynność wymaga dziś 3–5 programów komercyjnych: AIDA64 do wyceny i raportu, HD Tune do testu dysku, CrystalDiskInfo do SMART, osobne narzędzia do przenoszenia profili i haseł. SerwisKit robi to w jednym oknie, offline, z raportem, który można wydrukować i dołączyć do protokołu.
-
-## Co już działa (Faza 1 + SMART z Fazy 2)
+## Co robi
 
 | Moduł | Zawartość |
 |---|---|
-| `hw.cpu` | model, producent, socket, rdzenie/wątki, taktowanie nominalne i bieżące (liczniki wydajności), cache L2/L3, architektura, wirtualizacja, SLAT |
+| `hw.cpu` | model, producent, socket, rdzenie/wątki, taktowanie nominalne i bieżące, cache L2/L3, architektura, wirtualizacja, SLAT |
 | `hw.memory` | moduły (slot, pojemność, taktowanie, producent, part number, typ, napięcie), zajętość slotów, maksimum płyty, korekcja błędów |
 | `hw.board` | producent, model, wersja, numer seryjny, etykieta SMBIOS |
 | `hw.bios` | wersja i data BIOS‑u, SMBIOS, BIOS systemu, kontroler EC, tryb firmware (UEFI/BIOS) |
-| `hw.gpu` | adaptery, sterownik i data, tryb pracy, **realny VRAM** z rejestru (WMI obcina do 4 GiB) |
-| `hw.monitor` | model, producent, rok produkcji, przekątna, **tryb natywny z EDID**, maks. odświeżanie, wejście cyfrowe/analogowe |
-| `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan (na desktopie: czytelna degradacja) |
-| `hw.disk_inventory` | wszystkie dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
-| `hw.sensors` | temperatury (rdzenie CPU: Tctl/Tdie i CCD, rdzeń GPU, hotspot, pamięć, dyski NVMe/ATA, strefy ACPI, bateria, płyta), wentylatory w RPM i PWM, moc pakietu CPU i karty, napięcia CPU/SoC/GPU, taktowania i obciążenie GPU; min/max/średnia z próbek co sekundę i wykres temperatur (AMD ADL, NVIDIA NVML, WMI, PawnIO) |
-| `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB, wykres rozpięty na cały dysk), prędkość minimalna/średnia/maksymalna, czas dostępu i IOPS losowego odczytu 4K, lista nieczytelnych bloków; wybór dysku i czasu testu, próbkowanie całej powierzchni, Start/Anuluj, zapis wykresu do PNG |
-| `storage.sectors` | skan nieczytelnych sektorów jak Error Scan w HD Tune: mapa powierzchni (zielone/czerwone komórki), lista nieczytelnych zakresów z pozycją w MB, tryb szybki (próbki po całej powierzchni) i dokładny (każda jednostka 4 MiB); wybór dysku, Start/Anuluj |
-| `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd (stan, temperatura, magistrala, typ, zużycie, godziny pracy, zapisane dane), baner oceny, wskaźniki NVMe (zapas bloków, % zużycia, odczyt/zapis, komendy hosta, cykle, błędy medium) lub ATA (temperatura, zużycie, przealokowane/oczekujące/niepoprawne sektory, CRC), **pełna tabela atrybutów ATA z tłumaczonymi nazwami i oceną każdego atrybutu** |
+| `hw.gpu` | adaptery, sterownik i data, tryb pracy, realny VRAM z rejestru (WMI obcina do 4 GiB) |
+| `hw.monitor` | model, producent, rok produkcji, przekątna, tryb natywny z EDID, maks. odświeżanie, wejście cyfrowe/analogowe |
+| `hw.battery` | pojemność projektowa i rzeczywista, zużycie ogniwa, napięcie, moc ładowania, stan |
+| `hw.disk_inventory` | dyski: model, interfejs, rozmiar, sektor, firmware, numer seryjny, partycje, stan |
+| `hw.sensors` | temperatury (rdzenie CPU: Tctl/Tdie i CCD, rdzeń GPU, hotspot, pamięć, dyski, strefy ACPI, bateria, płyta), wentylatory w RPM i PWM, moc pakietu i karty, napięcia, taktowania i obciążenie GPU; min/max/średnia z próbek co sekundę i wykres temperatur |
+| `storage.smart` | stan dysków w układzie CrystalDiskInfo: przegląd, baner oceny, wskaźniki NVMe albo ATA, pełna tabela atrybutów ATA z oceną każdego z nich |
+| `storage.bench` | mapa prędkości odczytu (MB/s od pozycji w GB), min/średnia/maks, czas dostępu i IOPS losowego odczytu 4K; wybór dysku i czasu testu, próbkowanie całej powierzchni, zapis wykresu do PNG |
+| `storage.sectors` | skan nieczytelnych sektorów jak Error Scan w HD Tune: mapa powierzchni, lista nieczytelnych zakresów, tryb szybki i dokładny |
 | `system.info` | wersja systemu, model komputera, RAM, uptime, czas lokalny, typ komputera, hypervisor, uprawnienia |
 | `system.live` | wykresy obciążenia CPU, taktowania i zużycia RAM — próbka co sekundę, historia 10 minut |
 
-Raport: JSON (maszynowy, `schema_version`) i HTML (samodzielny plik, inline SVG, bez JavaScriptu).
+Raport: JSON (maszynowy, `schema_version`) i HTML (samodzielny plik, inline SVG, bez JavaScriptu). Dane zbierane są raz, więc oba pliki są spójne.
 
-SMART i benchmark prędkości wymagają uprawnień administratora (manifest release je zapewnia). Czujniki CPU i płyty wymagają zainstalowanego [PawnIO](https://pawnio.eu/): bez niego raport działa, a moduł `hw.sensors` pokazuje notkę zamiast tych sekcji. Gdy kontroler nie przekazuje SMART (mostek USB, RAID, niektóre porty SATA), moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych. Benchmark bez administratora kończy się czytelnym komunikatem o odmowie dostępu.
+## Wymagania i uprawnienia
 
-## Zakres (wersja 1.0)
+- Windows 10/11 x64. Do zbudowania: Rust 1.99 (MSVC) + Visual Studio Build Tools.
+- Wydanie ma manifest `requireAdministrator`, bo SMART i testy dysków czytają `\\.\PhysicalDriveN`. Build deweloperski manifestu nie ma, żeby `cargo run` nie wywoływał UAC.
+- Czujniki CPU i płyty wymagają zainstalowanego [PawnIO](https://pawnio.eu/) — aplikacja go nie pobiera ani nie instaluje: wykrywa bibliotekę, a bez niej pokazuje notkę. Raport działa dalej.
+- Gdy kontroler nie przekazuje SMART (mostek USB, RAID) albo proces nie ma uprawnień, moduł pokazuje powód i stan „Nieznane” — nie zmyśla danych.
 
-- **Dyski:** SMART NVMe i ATA/SATA (gotowe), sekwencyjny odczyt powierzchni z mapą prędkości, losowy odczyt 4K i czas dostępu (gotowe), skan nieczytelnych sektorów w trybie szybkim i dokładnym (gotowe), test zapisu tylko za jawnym potwierdzeniem.
-- **Migracja:** wykrywanie profili Chrome/Edge/Brave/Firefox, zakładki, historia, ustawienia, hasła w granicach możliwości systemu, zaszyfrowany pakiet `.skpkg`.
-- **Raport:** JSON i HTML (gotowe w Fazie 1).
-
-Czego nie ma i dlaczego: temperatury rdzeni CPU, napięcia i obroty wentylatorów wymagają sterownika jądra — świadomie poza wersją 1.0 (`docs/PLAN.md` §2). Rozdzielczość natywna monitora pochodzi z EDID; HDR i CTA‑861 są poza Fazą 1.
-
-## Stos
-
-Rust 1.99 (MSVC) · egui 0.37 / eframe 0.37 / egui_plot 0.38 (GUI, jeden exe, bez Node i WebView2) · `windows` 0.62 · `wmi` 0.18 · `serde` · `clap` · `chrono` · `include_dir` (wkompilowane tłumaczenia). Kolejne fazy dołożą `rusqlite` i `age`.
-
-Struktura: `sk-core` (kontrakt modułów i widoków, typy benchmarku), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, firmware, dyski i SMART, odczyt powierzchni), `sk-modules` (moduły + parsery SMART + analiza mapy prędkości), `sk-app` (binarka `serwiskit`, raport JSON/HTML, panel i wątek benchmarku).
-
-Wersja release ma manifest `requireAdministrator` — SMART i testy dysków wymagają administratora. Build deweloperski manifestu nie zawiera, żeby `cargo run` nie wywoływał UAC. Wydanie startuje też **bez okna konsoli** (podsystem GUI): podwójne kliknięcie otwiera tylko okno aplikacji. `cargo run` zostaje przy konsoli, żeby widzieć `--help` i komunikaty błędów.
-
-## Budowanie
+## Uruchomienie
 
 ```powershell
 cargo build --release
 .\target\release\serwiskit.exe
 ```
 
-Wymagania: Rust (toolchain MSVC) + Visual Studio Build Tools. Tryb headless:
+Gotowy plik jest w [Releases](https://github.com/Epi100plates/serwis/releases) — portable ZIP z `serwiskit.exe`, `LICENSE` i sumą SHA‑256.
+
+Wydanie startuje bez okna konsoli — podwójne kliknięcie otwiera tylko okno aplikacji. `cargo run` zostaje przy konsoli, żeby widzieć `--help` i komunikaty błędów.
+
+Tryb CLI (bez GUI):
 
 ```powershell
 .\target\release\serwiskit.exe report --json raport.json
@@ -92,34 +53,36 @@ Wymagania: Rust (toolchain MSVC) + Visual Studio Build Tools. Tryb headless:
 .\target\release\serwiskit.exe report --html raport.html --module hw.cpu --locale en
 ```
 
-`--json` i `--html` można łączyć; dane zbierane są raz, więc oba pliki są spójne.
+`--json` i `--html` można łączyć. Tryb `report` dołącza do konsoli, z której go uruchomiono, więc wydruk „Raport zapisany…” trafia do tego samego okna (przekierowanie `> log.txt` działa). Powłoka nie czeka na proces GUI — w skrypcie użyj `Start-Process -Wait` (PowerShell) albo `start /wait` (cmd).
 
-Tryb `report` w wydaniu dołącza do konsoli, z której go uruchomiono, więc wydruk „Raport zapisany…” trafia do tego samego okna (przekierowanie `> log.txt` działa jak zwykle). Jeśli proces został podniesiony przez UAC i nie ma konsoli rodzica, otwiera własną — tak jak dotąd. Gdy uruchomisz `report` z Eksploratora, okno konsoli pojawi się tylko na czas zbierania raportu. Powłoka nie czeka na proces GUI: w skrypcie użyj `Start-Process -Wait` (PowerShell) albo `start /wait` (cmd).
-
-Bramki jakości (wszystkie muszą być zielone):
+## Rozwój
 
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all
-cargo test -p sk-modules --test hardware -- --ignored   # prawdziwe WMI tej maszyny
+cargo test --all                                        # 329 testów, bez sprzętu
+cargo test -p sk-modules --test hardware -- --ignored    # prawdziwe WMI tej maszyny
+cargo test -p sk-win --lib -- --ignored hardware         # SMART, rejestr, PawnIO, Super I/O
+cargo build --release
 ```
 
-## Styl
+Cztery pierwsze bramki muszą być zielone przed zgłoszeniem pracy; to samo robi CI (`.github/workflows/ci.yml`, `windows-latest`) po każdym pushu.
 
-Dokumentacja i interfejs są dla ludzi, którzy znają temat. Piszemy krótko: bez tłumaczenia oczywistości, powtarzania tej samej wartości w kilku miejscach i opisów „co robi przycisk”. Nowy tekst ma nieść informację, której nie da się odczytać z widoku — jeśli nic nie wnosi, nie dodajemy go (reguła 11 w [`AGENTS.md`](AGENTS.md)).
+**Po każdej zmianie commit i `git push origin main`.** Praca, która została tylko lokalnie, nie istnieje — także dla dokumentacji i poprawek w stylu. Szczegóły: [`AGENTS.md`](AGENTS.md) (reguła 12).
+
+Struktura: `sk-core` (kontrakt modułów i widoków, typy testów dyskowych), `sk-win` (jedyne miejsce z `unsafe`: WMI z cache, rejestr, EDID, dyski i SMART, odczyt powierzchni, PawnIO), `sk-modules` (moduły i parsery), `sk-app` (binarka `serwiskit`, raport JSON/HTML, GUI i wątki testów).
+
+Stos: Rust 1.99 · egui/eframe 0.37 · egui_plot 0.38 · `windows` 0.62 · `wmi` 0.18 · `serde` · `clap` · `chrono` · `include_dir` · `png`.
 
 ## Dokumentacja
 
-- [`docs/PLAN.md`](docs/PLAN.md) — plan działania, decyzje architektoniczne, zakres, ryzyka, fazy.
+- [`docs/PLAN.md`](docs/PLAN.md) — plan, decyzje architektoniczne, zakres, ryzyka, fazy.
 - [`docs/MODULE_GUIDE.md`](docs/MODULE_GUIDE.md) — jak dodać nowy moduł (kontrakt, recepta, checklista).
 - [`docs/fixtures/wmi/README.md`](docs/fixtures/wmi/README.md) — skąd pochodzą fixtures i jak je odświeżyć.
 - [`AGENTS.md`](AGENTS.md) — zasady dla kontrybutorów i agentów AI.
 
-## Licencja
+## Licencja i granice
 
-GPL-3.0-only (`LICENSE`). Kod pochodny musi pozostać na GPL-3.0. Zależności są GPL-kompatybilne (egui MIT/Apache-2.0, `age` MIT/Apache-2.0, `rusqlite` MIT).
-
-## Bezpieczeństwo i etyka
+GPL‑3.0-only ([`LICENSE`](LICENSE)). Kod pochodny musi pozostać na GPL‑3.0; zależności są zgodne (MIT, Apache‑2.0, LGPL‑2.1 dla modułów PawnIO).
 
 Narzędzie działa lokalnie i offline, nie wysyła danych użytkownika. Migracja danych wymaga zgody właściciela komputera. Nie implementujemy obejść zabezpieczeń przeglądarek (App‑Bound Encryption) ani blokad plików — to techniki charakterystyczne dla infostealerów.

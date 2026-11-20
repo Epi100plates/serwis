@@ -36,6 +36,7 @@ Wszystkie cztery bramki (`fmt`, `clippy`, `test`, `build`) muszą być zielone p
 9. Licencja projektu to **GPL-3.0-only**. Nowa zależność musi być GPL-kompatybilna (MIT, Apache-2.0, BSD, MPL-2.0 — tak; kod proprietary — nie). Nie dodawaj zależności o niejasnej licencji.
 10. Wersja release ma manifest `requireAdministrator` (build.rs, tylko profil release). Nie usuwaj tej bramki i nie zakładaj, że proces działa bez uprawnień administratora — sprawdzaj to w kodzie, zamiast zgadywać.
 11. **Żadnych zbędnych informacji.** Odbiorcą jest technik, który zna temat: nie opisuj w UI i dokumentacji tego, co widać na ekranie, nie tłumacz oczywistości („test tylko czyta dane”, „wymaga administratora” — to mówi plakietka uprawnień) i nie powtarzaj tej samej wartości w kilku miejscach. Nowy tekst ma nieść informację, której nie da się odczytać z widoku; jeśli nic nie wnosi — nie dodawaj go.
+12. **Każda zmiana kończy się pushem.** Po zielonych bramkach: commit i `git push origin main`. Dotyczy to też dokumentacji, komentarzy i zmian w `.github/` — praca, która została tylko lokalnie, nie istnieje. CI (`.github/workflows/ci.yml`) uruchamia cztery bramki na `windows-latest` przy każdym pushu, więc czerwony wynik widać od razu; push odrzucony jako non‑fast‑forward rozwiązuj przez `git pull --rebase`, nigdy `--force` na `main`.
 
 ## Zakresy zapisu przy pracy równoległej
 
@@ -91,7 +92,7 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 - `MockWmi` wybiera odpowiedź po **najdłuższym** pasującym fragmencie zapytania (inaczej `Win32_PhysicalMemoryArray` łapie odpowiedź dla `Win32_PhysicalMemory`).
 - Raport HTML powstaje z modelu `View` (`sk-app/src/html.rs`), nie z szablonów per moduł; wykresy to inline SVG. Nie dodawaj `askama`.
 - Telemetria: próbki zbiera wątek roboczy (`sk-app/src/live.rs`) raz na sekundę **tylko gdy `system.live` albo `hw.sensors` jest otwarte**; bufor 600 próbek. `collect()` modułu nie próbkuje.
-- Zapytania o klasy używane w kilku miejscach żyją w `sk_core::queries` (`WIN32_OPERATING_SYSTEM`, `WIN32_VIDEO_CONTROLLER`, `PROCESSOR_PERFORMANCE`, `WIN32_COMPUTER_SYSTEM`). Cache jest kluczowany po `(namespace, WQL)`, więc inna lista pól = drugie zapytanie w rundzie. Statystyki widać w raporcie (`wmi_cache`) — na tej maszynie 16 zapytań i 1 trafienie na 10 modułów.
+- Zapytania o klasy używane w kilku miejscach żyją w `sk_core::queries` (`WIN32_OPERATING_SYSTEM`, `WIN32_VIDEO_CONTROLLER`, `PROCESSOR_PERFORMANCE`, `WIN32_COMPUTER_SYSTEM`). Cache jest kluczowany po `(namespace, WQL)`, więc inna lista pól = drugie zapytanie w rundzie. Statystyki widać w raporcie (`wmi_cache`) — na tej maszynie 18 zapytań i 5 trafień przy 14 modułach (2026‑11‑20).
 - Stany w komórkach tabeli: `Table::with_value_key(row, column, "common.value.digital")`. Nie wpisuj do komórki słów typu „Digital”/„None”.
 - Golden: `crates/sk-modules/tests/golden/*.json` pilnują kształtu widoków `hw.cpu`, `hw.memory` i `storage.smart`; odświeżanie tylko świadome: `$env:UPDATE_GOLDEN = "1"; cargo test -p sk-modules --test golden`.
 - Sprawdzanie GUI: `PrintWindow` **z flagą `PW_RENDERFULLCONTENT` (2)** przechwytuje treść renderowaną przez wgpu — sprawdzone na tej maszynie (`tools/screenshot-window.ps1`, działa też dla okna zasłoniętego przez inną aplikację). Bez tej flagi obraz wychodzi biały. Gdy okno ma być naprawdę widoczne, `tools/screenshot-gui.ps1` stawia je na wierzchu (`SetWindowPos(HWND_TOPMOST)`) i robi `CopyFromScreen`; samo `SetForegroundWindow` bywa blokowane przez okno pełnoekranowe. Testy UI nadal przez `egui_kittest`.
@@ -189,4 +190,5 @@ Rejestracja jest **jawna** (`ModuleRegistry::add::<T>()`). Nie wracaj do `invent
 - [ ] brak `unsafe` poza `sk-win`, brak `unwrap()` na danych zewnętrznych,
 - [ ] klucze i18n w `pl` i `en`,
 - [ ] brak sekretów i danych osobowych w logach, fixture'ach i testach,
-- [ ] dokumentacja zaktualizowana, jeśli zmienił się kontrakt.
+- [ ] dokumentacja zaktualizowana, jeśli zmienił się kontrakt,
+- [ ] commit i `git push origin main` (reguła 12).

@@ -32,7 +32,7 @@ Dwa tryby użycia tej samej logiki:
 - Wykresy „live” dla obciążenia CPU/RAM/dysku i temperatury NVMe.
 - Dyski: inwentarz, SMART (NVMe + ATA/SATA), stan zdrowia, przebieg, błędy.
 - Benchmarki: sekwencyjny odczyt całej powierzchni (mapa prędkości), losowy odczyt 4K, czas dostępu; zapis tylko na jawnie wybranym dysku nie‑systemowym, po potwierdzeniu.
-- Surface test: odczyt każdego bloku z retry i raportem błędnych LBA (bez zapisu w v1).
+- Surface test: odczyt każdej jednostki 4 MiB z raportem błędnych LBA (bez zapisu w v1; bez ponowień i bisection — pozycja 4 MiB wystarcza do wskazania obszaru, a powtórzenia na końcu życia dysku ciągną się minutami).
 - Migracja przeglądarek: Chrome, Edge, Brave, Firefox (wykrywanie profili, zakładki, historia, ustawienia, hasła w granicach możliwości — §6).
 - Pakiet przenoszenia `.skpkg` — zaszyfrowany hasłem, z manifestem i sumami kontrolnymi.
 - Raport: JSON + HTML (do wydruku/PDF przez przeglądarkę), eksport wyników benchmarków.
@@ -200,7 +200,7 @@ Legenda uprawnień: **U** = zwykły użytkownik, **A** = administrator, **D** = 
 | Benchmark: sekwencyjny odczyt całej powierzchni + mapa prędkości | `\\.\PhysicalDriveN`, `FILE_FLAG_NO_BUFFERING`, wyrównanie do sektora fizycznego | A | 2 |
 | Benchmark: losowy odczyt 4K (IOPS), czas dostępu, QD1 | jw. | A | 2 |
 | Benchmark zapisu | jw. (nadpisuje dane) | **D** | 2 |
-| Surface test (odczyt + retry + lista złych LBA) | jw. | A | 2 |
+| Surface test (odczyt + lista złych LBA) | jw. | A | 2 |
 | Wykrywanie przeglądarek i profili, procesy działające | rejestr/ścieżki + `EnumProcesses` | U | 3 |
 | Zakładki, historia, ustawienia, favikony, autofill | `Bookmarks`/`History`/`Preferences`/`Web Data`, `places.sqlite` | U | 3 |
 | Hasła Firefox | `logins.json` + `key4.db` 1:1 do nowego profilu | U | 3 |
@@ -325,7 +325,7 @@ Zrealizowane:
 
 **Akceptacja — potwierdzona:** wszystkie moduły zwracają realne dane na tej maszynie (`report` → 10 modułów, 0 błędów), bateria przechodzi na fixture syntetycznym, raport HTML otwiera się w przeglądarce i zawiera komplet sekcji (zrzuty: `docs/screenshot.png`, `docs/report.png`), testy modułów na mockach zielone, testy `--ignored` przechodzą.
 
-### Faza 2 — Dyski: SMART i benchmarki (4–7 dni) — 🚧 w toku (SMART gotowy 2026‑11‑18)
+### Faza 2 — Dyski: SMART i benchmarki (4–7 dni) — 🚧 w toku (2026‑11‑20: SMART, `storage.bench` i `storage.sectors` gotowe)
 
 **Zrealizowane — `storage.smart`:**
 
@@ -414,7 +414,9 @@ Akceptacja: spełniona — moduł pokazuje temperaturę rdzeni CPU, napięcia i 
 
 ### Faza 6 — Dystrybucja (2–3 dni)
 
-Portable ZIP + instalator (Inno Setup lub NSIS), podpis Authenticode (bez podpisu Smart App Control blokuje nieznane aplikacje na czystym Win11), GitHub Releases, CHANGELOG, wersjonowanie SemVer, README z zrzutami ekranu.
+Portable ZIP + instalator (Inno Setup lub NSIS), podpis Authenticode (bez podpisu Smart App Control blokuje nieznane aplikacje na czystym Win11), GitHub Releases, CHANGELOG, wersjonowanie SemVer.
+
+**Zrealizowane (2026‑11‑20):** wydanie `v0.1.0` w GitHub Releases — portable ZIP z `serwiskit.exe`, `LICENSE` i `README.md` plus suma SHA‑256; wersja bierze się z `workspace.package.version`. README nie zawiera już zrzutów ekranu — opis modułów jest w tabeli, a zrzuty zostają w `docs/` jako dowody w PLAN i AGENTS. Zostało: podpis Authenticode, instalator, CHANGELOG.
 
 ---
 
