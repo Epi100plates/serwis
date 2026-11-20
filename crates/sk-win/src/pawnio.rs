@@ -29,6 +29,13 @@ pub const LPC_IO: &[u8] = include_bytes!("../assets/pawnio/LpcIO.bin");
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO";
 const DEFAULT_LIBRARY: &str = r"C:\Program Files\PawnIO\PawnIOLib.dll";
 
+/// Wybrany slot i lista dozwolonych portów są w sterowniku **globalne**, nie per
+/// uchwyt: dwa równoległe `probe()` w jednym procesie psują sobie wykrywanie
+/// Super I/O. Aplikacja woła `probe()` raz na proces, ale cargo uruchamia testy
+/// sprzętowe równolegle, więc te muszą stać w kolejce.
+#[cfg(test)]
+pub(crate) static PROBE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 type OpenFn = unsafe extern "system" fn(*mut *mut std::ffi::c_void) -> i32;
 type LoadFn = unsafe extern "system" fn(*mut std::ffi::c_void, *const u8, usize) -> i32;
 type ExecuteFn = unsafe extern "system" fn(

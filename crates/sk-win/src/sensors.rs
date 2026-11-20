@@ -1000,6 +1000,9 @@ mod tests {
     #[test]
     #[ignore = "sprzętowy: wymaga karty AMD z ADL"]
     fn amd_gpu_reports_plausible_sensors() {
+        let _serial = crate::pawnio::PROBE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sensors = WinSensors::new();
         let readings = sensors.readings();
         let temperatures: Vec<&SensorReading> = readings

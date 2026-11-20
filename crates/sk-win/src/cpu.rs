@@ -383,6 +383,9 @@ mod tests {
     #[test]
     #[ignore = "wymaga PawnIO i prawdziwego procesora"]
     fn hardware_cpu_sensors_are_plausible() {
+        let _serial = crate::pawnio::PROBE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sensors = CpuSensors::probe().expect("PawnIO i obsługiwany procesor");
         let first = sensors.readings();
         println!("CPU: {first:#?}");

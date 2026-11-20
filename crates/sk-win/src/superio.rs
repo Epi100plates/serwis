@@ -339,6 +339,9 @@ mod tests {
     #[test]
     #[ignore = "wymaga PawnIO i płyty z Super I/O"]
     fn hardware_superio_reports_fans_and_temperatures() {
+        let _serial = crate::pawnio::PROBE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let board = SuperIo::probe().expect("Super I/O na tej płycie");
         let readings = board.readings();
         println!("Super I/O {}: {readings:#?}", board.chip.name());
