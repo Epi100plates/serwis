@@ -56,7 +56,7 @@ jobs:
           $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
           if ($LASTEXITCODE -eq 0) {
             $release = $json | ConvertFrom-Json
-            Write-Output "Wydanie $tag: draft=$($release.draft) prerelease=$($release.prerelease) assets=$($release.assets.Count) url=$($release.html_url)"
+            Write-Output "Wydanie ${tag}: draft=$($release.draft) prerelease=$($release.prerelease) assets=$($release.assets.Count) url=$($release.html_url)"
             if (-not $release.draft) {
               Write-Output "Wydanie $tag jest opublikowane - nic do zrobienia"
               "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
